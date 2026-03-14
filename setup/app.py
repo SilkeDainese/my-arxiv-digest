@@ -387,6 +387,57 @@ def _build_au_student_config(
     return config
 
 
+def _render_repo_setup_steps(cron_expr: str, *, recipient_in_config: bool = False) -> None:
+    """Show the GitHub-side steps after generating a downloadable config."""
+    secrets_html = """
+<p><span class="step-number">3</span> <strong>Add secrets</strong></p>
+<p style="margin-left: 36px;">
+Add <code>RECIPIENT_EMAIL</code> plus either <code>DIGEST_RELAY_TOKEN</code> or your own
+<code>SMTP_USER</code> and <code>SMTP_PASSWORD</code> in your fork’s
+<strong>Settings → Secrets and variables → Actions</strong>.
+</p>
+"""
+    if recipient_in_config:
+        secrets_html = """
+<p><span class="step-number">3</span> <strong>Add secrets</strong></p>
+<p style="margin-left: 36px;">
+Add either <code>DIGEST_RELAY_TOKEN</code> or your own <code>SMTP_USER</code> and
+<code>SMTP_PASSWORD</code> in your fork’s <strong>Settings → Secrets and variables → Actions</strong>.
+<code>RECIPIENT_EMAIL</code> is optional here because this preset already writes the student email into <code>config.yaml</code>.
+</p>
+"""
+
+    st.divider()
+    st.markdown("## Next Steps")
+    st.markdown(
+        f"""
+<div class="brand-card">
+<p><span class="step-number">1</span> <strong>Fork the template repo</strong></p>
+<p style="margin-left: 36px;">
+Fork <a href="https://github.com/SilkeDainese/arxiv-digest" target="_blank">SilkeDainese/arxiv-digest</a>.
+</p>
+
+<p><span class="step-number">2</span> <strong>Upload your config.yaml</strong></p>
+<p style="margin-left: 36px;">
+In your fork, click <strong>Add file → Upload files</strong> and upload the <code>config.yaml</code>
+you just downloaded. This file is the digest’s editable source of truth: later changes to interests,
+keywords, or schedule happen by editing <code>config.yaml</code> in GitHub or by rerunning the setup wizard
+and uploading a new one.
+</p>
+
+{secrets_html}
+
+<p><span class="step-number">4</span> <strong>Switch the workflow to weekly</strong></p>
+<p style="margin-left: 36px;">
+Replace the cron line in <code>.github/workflows/digest.yml</code> with:
+</p>
+<pre style="margin-left: 36px;"><code>    - cron: '{cron_expr}'</code></pre>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
 def render_mini_setup() -> None:
     """Render a separate mini setup flow for students without ORCID."""
     st.markdown("## Mini setup — no ORCID")
@@ -477,38 +528,7 @@ def render_mini_setup() -> None:
             st.code(config_yaml, language="yaml")
             st.info("Select all text above and copy with Ctrl+C (Cmd+C on Mac)")
 
-    st.divider()
-    st.markdown("## Next Steps")
-    st.markdown(
-        f"""
-<div class="brand-card">
-<p><span class="step-number">1</span> <strong>Fork the template repo</strong></p>
-<p style="margin-left: 36px;">
-Fork <a href="https://github.com/SilkeDainese/arxiv-digest" target="_blank">SilkeDainese/arxiv-digest</a>.
-</p>
-
-<p><span class="step-number">2</span> <strong>Upload your config.yaml</strong></p>
-<p style="margin-left: 36px;">
-In your fork, click <strong>Add file → Upload files</strong> and upload the <code>config.yaml</code>
-you just downloaded.
-</p>
-
-<p><span class="step-number">3</span> <strong>Add secrets</strong></p>
-<p style="margin-left: 36px;">
-Add <code>RECIPIENT_EMAIL</code> plus either <code>DIGEST_RELAY_TOKEN</code> or your own
-<code>SMTP_USER</code> and <code>SMTP_PASSWORD</code> in your fork’s
-<strong>Settings → Secrets and variables → Actions</strong>.
-</p>
-
-<p><span class="step-number">4</span> <strong>Switch the workflow to weekly</strong></p>
-<p style="margin-left: 36px;">
-Replace the cron line in <code>.github/workflows/digest.yml</code> with:
-</p>
-<pre style="margin-left: 36px;"><code>    - cron: '{cron_expr}'</code></pre>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
+    _render_repo_setup_steps(cron_expr)
 
 
 def render_au_student_setup() -> None:
@@ -581,6 +601,11 @@ def render_au_student_setup() -> None:
         type="primary",
         use_container_width=True,
     )
+    st.caption(
+        "Why a config file? The digest reads config.yaml from the repo on every run. This AU-student preset is the standard package, and later edits happen by replacing or editing that file."
+    )
+
+    _render_repo_setup_steps("0 7 * * 1", recipient_in_config=True)
 
 
 
