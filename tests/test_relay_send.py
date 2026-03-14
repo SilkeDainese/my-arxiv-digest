@@ -1,5 +1,6 @@
 import relay.api.send as relay_send
 from pathlib import Path
+import json
 
 
 class _FakeHandler:
@@ -28,3 +29,10 @@ def test_relay_root_health_page_exists():
     assert "arXiv Digest relay is running" in html
     assert "GET /api/send" in html
     assert "POST /api/send" in html
+
+
+def test_relay_vercel_config_rewrites_root_to_health_page():
+    config_path = Path(__file__).resolve().parents[1] / "relay" / "vercel.json"
+    config = json.loads(config_path.read_text())
+
+    assert {"source": "/", "destination": "/index.html"} in config["rewrites"]
