@@ -32,7 +32,7 @@ except ImportError:
     HAS_ANTHROPIC = False
 
 try:
-    import google.generativeai as genai
+    from google import genai
     HAS_GEMINI = True
 except ImportError:
     HAS_GEMINI = False
@@ -435,8 +435,7 @@ def _analyse_with_claude(papers: list[dict[str, Any]], config: dict[str, Any], a
 
 def _analyse_with_gemini(papers: list[dict[str, Any]], config: dict[str, Any], api_key: str) -> list[dict[str, Any]]:
     """Score papers using Gemini 2.0 Flash (free tier)."""
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    client = genai.Client(api_key=api_key)
     analysed = []
 
     for i, paper in enumerate(papers):
@@ -447,7 +446,10 @@ def _analyse_with_gemini(papers: list[dict[str, Any]], config: dict[str, Any], a
             time.sleep(4)  # free tier = 15 RPM
 
         try:
-            response = model.generate_content(prompt)
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt,
+            )
             text = response.text.strip()
             # Strip markdown code fences if present
             if text.startswith("```"):

@@ -22,7 +22,8 @@ except ImportError:
     _ANTHROPIC_AVAILABLE = False
 
 try:
-    import google.generativeai as _genai_lib
+    from google import genai as _genai_lib
+    from google.genai import types as _genai_types
     _GEMINI_AVAILABLE = True
 except ImportError:
     _GEMINI_AVAILABLE = False
@@ -351,9 +352,11 @@ def _call_ai(prompt: str, max_tokens: int = 512) -> str | None:
     gemini_key = _get_gemini_key()
     if gemini_key and _GEMINI_AVAILABLE:
         try:
-            _genai_lib.configure(api_key=gemini_key)
-            model = _genai_lib.GenerativeModel("gemini-1.5-flash")
-            response = model.generate_content(prompt)
+            _client = _genai_lib.Client(api_key=gemini_key)
+            response = _client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt,
+            )
             return response.text.strip()
         except Exception:
             pass
@@ -386,9 +389,12 @@ def _test_ai_key(gemini_key: str, anthropic_key: str) -> tuple[bool, str, str]:
     """
     if gemini_key and _GEMINI_AVAILABLE:
         try:
-            _genai_lib.configure(api_key=gemini_key)
-            model = _genai_lib.GenerativeModel("gemini-1.5-flash")
-            model.generate_content("Hi", generation_config={"max_output_tokens": 1})
+            _client = _genai_lib.Client(api_key=gemini_key)
+            _client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents="Hi",
+                config=_genai_types.GenerateContentConfig(max_output_tokens=1),
+            )
             return True, "Gemini", ""
         except Exception as e:
             gemini_err = str(e)
