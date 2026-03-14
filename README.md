@@ -16,13 +16,13 @@ If you have suggestions, open an issue or [email me](mailto:dainese@phys.au.dk).
 
 ## Quick Start
 
-You need a GitHub account and an email address. That is it. AI scoring works out of the box — no API keys required.
+Three steps. No API keys, no passwords, no terminal.
 
 ### 1. Generate your config
 
 **[Open the setup wizard →](https://arxiv-digest-setup.streamlit.app)**
 
-Fill in your name, research description, keywords, and categories. The wizard generates a `config.yaml` file — download it.
+Fill in your name, research description, keywords, and the email address where you want your digest. The wizard generates a `config.yaml` file — download it.
 
 > **Students:** Choose the "AU Astronomy Student" track for a pre-filled config with your department's faculty, telescopes, and keywords. You can customise it later.
 
@@ -32,33 +32,15 @@ Fill in your name, research description, keywords, and categories. The wizard ge
 
 This creates your own copy. Everything runs in your fork — nothing is shared back.
 
-### 3. Upload your config
+### 3. Upload your config and run
 
 In your fork: **[Add file](https://docs.github.com/en/repositories/working-with-files/managing-files/adding-a-file-to-a-repository) → Upload files** → drag in `config.yaml` → **Commit changes**.
 
-### 4. Add email secrets
+Then go to **Actions → arXiv Digest → Run workflow → Run workflow**.
 
-Your fork needs to know where to send emails. Go to **Settings → Secrets and variables → Actions** ([what are secrets?](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions)) and add these three:
+You should get your first digest email within a few minutes. If something is wrong, the workflow log tells you exactly what to fix.
 
-| Secret | What to put | Where to get it |
-|--------|-------------|-----------------|
-| `RECIPIENT_EMAIL` | Your email address | — |
-| `SMTP_USER` | Your Gmail address | — |
-| `SMTP_PASSWORD` | A Gmail App Password | **[Generate one here →](https://myaccount.google.com/apppasswords)** (requires [2-Step Verification](https://myaccount.google.com/signinoptions/two-step-verification)) |
-
-Using Outlook? See [Outlook setup](#outlook--office-365) below.
-
-Sending to multiple people? Put a comma-separated list in `RECIPIENT_EMAIL`, e.g. `alice@uni.dk,bob@uni.dk`.
-
-### 5. Send your first digest
-
-**Actions → arXiv Digest → Run workflow → Run workflow**.
-
-You should get an email within a few minutes. If something is wrong, the workflow log tells you exactly what to fix. This is the same button you can press anytime to trigger a manual run.
-
-### 6. Done
-
-Your digest now runs automatically **Mon/Wed/Fri at 9am Danish time** (07:00 UTC). No further action needed — papers show up in your inbox.
+**That's it.** Your digest now runs automatically **Mon/Wed/Fri at 9am Danish time**. Papers show up in your inbox — no further action needed.
 
 ---
 
@@ -66,24 +48,18 @@ Your digest now runs automatically **Mon/Wed/Fri at 9am Danish time** (07:00 UTC
 
 None of these are required. Everything works without them.
 
-**Faster AI scoring** — your fork comes with a shared Gemini key. For faster, more reliable scoring, add your own:
-
-| Secret | What you get | Where to get it |
-|--------|--------------|-----------------|
-| `GEMINI_API_KEY` | Your own Gemini key (free) | **[Google AI Studio →](https://aistudio.google.com/apikey)** |
-| `ANTHROPIC_API_KEY` | Claude scoring (best quality) | **[Anthropic Console →](https://console.anthropic.com/)** — $5 lasts hundreds of digests |
-
-Once you add your own key, set `own_api_key: true` in `config.yaml` to remove the nudge from your emails.
-
-**Keyword tracking** — go to **Settings → Actions → General → Workflow permissions** → select **"Read and write permissions"**. The digest will track which keywords actually match papers over time.
-
-**Feedback arrows** — set `github_repo: "yourusername/arxiv-digest"` in your `config.yaml`. Each paper card will show ↑/↓ arrows that nudge future scoring. ([How feedback works](#managing-your-digest))
+| Upgrade | What it does | How to set it up |
+|---------|--------------|------------------|
+| **Your own AI key** | Faster, more reliable scoring | Add `GEMINI_API_KEY` ([free →](https://aistudio.google.com/apikey)) or `ANTHROPIC_API_KEY` ([→](https://console.anthropic.com/)) as a [repo secret](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions). Set `own_api_key: true` in config.yaml |
+| **Feedback arrows** | ↑/↓ buttons on each paper to improve future scoring | Set `github_repo: "yourusername/arxiv-digest"` in config.yaml |
+| **Keyword tracking** | Track which keywords match papers over time | **Settings → Actions → General → Workflow permissions** → "Read and write" |
+| **Own email sender** | Send from your own Gmail/Outlook instead of the shared sender | Add `SMTP_USER` and `SMTP_PASSWORD` as [repo secrets](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions) ([Gmail App Password →](https://myaccount.google.com/apppasswords)) |
 
 ---
 
 ## How It Works
 
-The digest fetches new papers from arXiv, scores them against your interests, and emails you the best ones. AI scoring is included by default — no setup needed.
+Your fork comes with a shared Gemini API key and a shared email relay, so everything works from the first run. The digest automatically uses the best AI available and falls back gracefully:
 
 | Tier | Provider | Quality | What happens |
 |------|----------|---------|--------------|
@@ -98,29 +74,6 @@ If one tier fails, it cascades to the next. You always get a digest. No money go
 1. **Keyword matching** — your keywords are checked against each paper's title and abstract, weighted by the importance you assigned (1–10). The matcher is fuzzy on purpose: plurals, hyphenation, and close variants like `planet` / `planetary` are treated as related.
 2. **AI re-ranking** — the AI reads your `research_context` and re-ranks papers using that description. The more specific your research context, the better the scoring.
 3. **Author boost** — papers by your `research_authors` get a relevance bump. Papers you authored yourself get a celebration section.
-
----
-
-## Email Setup
-
-### Gmail
-
-1. Enable [2-Step Verification](https://myaccount.google.com/signinoptions/two-step-verification)
-2. Generate an [App Password](https://myaccount.google.com/apppasswords) — select "Mail" as the app
-3. Use the App Password as your `SMTP_PASSWORD` secret
-
-The default config uses Gmail — no changes needed in `config.yaml`.
-
-### Outlook / Office 365
-
-1. Set up an [App Password](https://account.microsoft.com/security) in your Microsoft account security settings
-2. Use the App Password as your `SMTP_PASSWORD` secret
-3. Update your `config.yaml`:
-
-```yaml
-smtp_server: "smtp.office365.com"
-smtp_port: 587
-```
 
 ---
 
@@ -163,7 +116,31 @@ These create labeled GitHub issues (`digest-feedback`) that are automatically in
 
 1. **Pause**: Go to your repo → Actions → arXiv Digest → click ⋯ → Disable workflow
 2. **Delete**: Go to your repo → Settings → scroll to Danger Zone → Delete this repository
-3. **Revoke email access**: Remove the App Password from your [Google](https://myaccount.google.com/apppasswords) or [Microsoft](https://account.microsoft.com/security) account
+
+---
+
+## Email Setup
+
+By default, digest emails are sent via a shared relay from `arxivdigestau@gmail.com`. No email setup needed.
+
+If you prefer to send from your own email, add `SMTP_USER` and `SMTP_PASSWORD` as [repo secrets](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions):
+
+### Gmail
+
+1. Enable [2-Step Verification](https://myaccount.google.com/signinoptions/two-step-verification)
+2. Generate an [App Password](https://myaccount.google.com/apppasswords) — select "Mail" as the app
+3. Add `SMTP_USER` (your Gmail address) and `SMTP_PASSWORD` (the App Password) as repo secrets
+
+### Outlook / Office 365
+
+1. Set up an [App Password](https://account.microsoft.com/security) in your Microsoft account
+2. Add `SMTP_USER` and `SMTP_PASSWORD` as repo secrets
+3. Update your `config.yaml`:
+
+```yaml
+smtp_server: "smtp.office365.com"
+smtp_port: 587
+```
 
 ---
 
@@ -173,10 +150,9 @@ These create labeled GitHub issues (`digest-feedback`) that are automatically in
 
 ```bash
 pip install -r requirements.txt
-export ANTHROPIC_API_KEY="your-key"  # optional
 export RECIPIENT_EMAIL="you@example.com"
-export SMTP_USER="you@gmail.com"
-export SMTP_PASSWORD="your-app-password"
+export SMTP_USER="you@gmail.com"        # optional — uses relay without this
+export SMTP_PASSWORD="your-app-password" # optional — uses relay without this
 python digest.py
 ```
 

@@ -1504,53 +1504,75 @@ def _parse_recipient_emails(value: Any) -> list[str]:
 
 
 # ─────────────────────────────────────────────────────────────
-#  EMAIL SENDING — Multi-provider SMTP
+#  EMAIL SENDING — Relay (default) or direct SMTP
 # ─────────────────────────────────────────────────────────────
 
-def send_email(html: str, paper_count: int, date_str: str, config: dict[str, Any],
-               papers: list[dict[str, Any]] | None = None) -> None:
-    """Send the digest HTML as an email via SMTP.
+RELAY_URL = os.environ.get(
+    "DIGEST_RELAY_URL",
+    "https://arxiv-digest-relay.vercel.app/api/send",
+)
+RELAY_TOKEN = os.environ.get("DIGEST_RELAY_TOKEN", "arxiv-digest-v1-relay")
 
-    Args:
-        html: Rendered HTML body of the digest.
-        paper_count: Total number of papers to display in the subject line.
-        date_str: Human-readable date string for the subject line.
-        config: Application config containing SMTP and recipient settings.
-        papers: Optional list of paper dicts for the plain-text fallback.
-    """
-    recipients = _parse_recipient_emails(config.get("recipient_email"))
 
-    # Support both new (SMTP_*) and legacy (GMAIL_*) secret names
-    smtp_user = os.environ.get("SMTP_USER", "").strip() or os.environ.get("GMAIL_USER", "").strip()
-    smtp_password = os.environ.get("SMTP_PASSWORD", "").strip() or os.environ.get("GMAIL_APP_PASSWORD", "").strip()
-
-    if not recipients or not smtp_user or not smtp_password:
-        print("⚠️  SMTP credentials or RECIPIENT_EMAIL not set — skipping email send.")
-        return
-
-    smtp_server = config["smtp_server"]
-    smtp_port = config["smtp_port"]
-
-    digest_name = config["digest_name"]
-    paper_word = "paper" if paper_count == 1 else "papers"
-    subject = f"🔭 {digest_name} — {paper_count} {paper_word} · {date_str}"
-    recipient_label = ", ".join(recipients)
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = f"{digest_name} <{smtp_user}>"
-    msg["To"] = recipient_label
-    # Build informative plain-text fallback
-    plain_lines = [f"Your arXiv digest for {date_str} — {paper_count} papers.\n"]
+def _build_plain_text(date_str: str, paper_count: int,
+                      papers: list[dict[str, Any]] | None) -> str:
+    """Build an informative plain-text fallback for the email."""
+    lines = [f"Your arXiv digest for {date_str} — {paper_count} papers.\n"]
     if papers:
         for p in papers[:10]:
             score = p.get("relevance_score", "?")
-            plain_lines.append(f"  [{score}/10] {p.get('title', 'Untitled')}")
-            plain_lines.append(f"         {p.get('url', '')}")
+            lines.append(f"  [{score}/10] {p.get('title', 'Untitled')}")
+            lines.append(f"         {p.get('url', '')}")
         if len(papers) > 10:
-            plain_lines.append(f"  ... and {len(papers) - 10} more")
-    plain_lines.append("\nOpen in a browser for the full experience.")
-    msg.attach(MIMEText("\n".join(plain_lines), "plain"))
+            lines.append(f"  ... and {len(papers) - 10} more")
+    lines.append("\nOpen in a browser for the full experience.")
+    return "\n".join(lines)
+
+
+def _send_via_relay(recipients: list[str], subject: str,
+                    html: str, plain_text: str) -> bool:
+    """Send email via the shared relay service. Returns True on success."""
+    payload = json.dumps({
+        "token": RELAY_TOKEN,
+        "recipients": recipients,
+        "subject": subject,
+        "html": html,
+        "plain_text": plain_text,
+    }).encode()
+
+    req = urllib.request.Request(
+        RELAY_URL,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+            if result.get("ok"):
+                if len(recipients) == 1:
+                    print(f"✅ Email sent to {recipients[0]} via relay")
+                else:
+                    print(f"✅ Email sent to {len(recipients)} recipients via relay")
+                return True
+            print(f"❌ Relay returned error: {result.get('error', 'unknown')}")
+            return False
+    except Exception as e:
+        print(f"❌ Relay send failed: {e}")
+        return False
+
+
+def _send_via_smtp(recipients: list[str], subject: str, html: str,
+                   plain_text: str, smtp_user: str, smtp_password: str,
+                   smtp_server: str, smtp_port: int,
+                   digest_name: str) -> bool:
+    """Send email via direct SMTP. Returns True on success."""
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = f"{digest_name} <{smtp_user}>"
+    msg["To"] = ", ".join(recipients)
+    msg.attach(MIMEText(plain_text, "plain"))
     msg.attach(MIMEText(html, "html"))
 
     try:
@@ -1563,9 +1585,8 @@ def send_email(html: str, paper_count: int, date_str: str, config: dict[str, Any
         if len(recipients) == 1:
             print(f"✅ Email sent to {recipients[0]} via {smtp_server}")
         else:
-            print(
-                f"✅ Email sent to {len(recipients)} recipients via {smtp_server}"
-            )
+            print(f"✅ Email sent to {len(recipients)} recipients via {smtp_server}")
+        return True
     except smtplib.SMTPAuthenticationError as e:
         print(f"❌ SMTP auth failed: {e}")
         if "gmail" in smtp_server.lower():
@@ -1573,9 +1594,41 @@ def send_email(html: str, paper_count: int, date_str: str, config: dict[str, Any
             print("   Generate one at: Google Account > Security > 2-Step Verification > App passwords")
         elif "office365" in smtp_server.lower():
             print("   For Office 365, use an App Password from your Microsoft account security settings.")
+        return False
     except Exception as e:
         print(f"❌ Email send failed: {e}")
         print("📋 Digest was saved as digest_output.html artifact — check Actions artifacts to download it.")
+        return False
+
+
+def send_email(html: str, paper_count: int, date_str: str, config: dict[str, Any],
+               papers: list[dict[str, Any]] | None = None) -> None:
+    """Send the digest email via relay (default) or direct SMTP.
+
+    Uses the shared relay service unless SMTP_USER and SMTP_PASSWORD are set
+    as environment variables, in which case it sends directly.
+    """
+    recipients = _parse_recipient_emails(config.get("recipient_email"))
+    if not recipients:
+        print("⚠️  No recipient email configured — skipping email send.")
+        return
+
+    digest_name = config["digest_name"]
+    paper_word = "paper" if paper_count == 1 else "papers"
+    subject = f"🔭 {digest_name} — {paper_count} {paper_word} · {date_str}"
+    plain_text = _build_plain_text(date_str, paper_count, papers)
+
+    # If SMTP credentials are set, send directly (self-hosted mode)
+    smtp_user = os.environ.get("SMTP_USER", "").strip() or os.environ.get("GMAIL_USER", "").strip()
+    smtp_password = os.environ.get("SMTP_PASSWORD", "").strip() or os.environ.get("GMAIL_APP_PASSWORD", "").strip()
+
+    if smtp_user and smtp_password:
+        _send_via_smtp(recipients, subject, html, plain_text,
+                       smtp_user, smtp_password,
+                       config["smtp_server"], config["smtp_port"],
+                       digest_name)
+    else:
+        _send_via_relay(recipients, subject, html, plain_text)
 
 
 # ─────────────────────────────────────────────────────────────
