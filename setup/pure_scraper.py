@@ -364,7 +364,16 @@ def scrape_pure_profile(url: str) -> tuple[dict | None, list | None, str | None]
 #  Publication Fetch (ORCID works API)
 # ─────────────────────────────────────────────────────────────
 
-def fetch_orcid_works(orcid_id: str) -> tuple[dict | None, list[str] | None, list[dict] | None, dict | None, str | None]:
+def fetch_orcid_works(
+    orcid_id: str,
+) -> tuple[
+    dict | None,
+    list[str] | None,
+    list[dict] | None,
+    dict | None,
+    dict | None,
+    str | None,
+]:
     """
     Fetch publications from the ORCID public API, derive keywords, and collect co-authors.
 
@@ -376,15 +385,16 @@ def fetch_orcid_works(orcid_id: str) -> tuple[dict | None, list[str] | None, lis
         orcid_id: bare ORCID identifier (e.g. "0000-0001-7568-6674")
 
     Returns:
-        (keywords_dict, titles, works_meta, coauthor_orcids_dict, error)
+        (keywords_dict, titles, works_meta, coauthor_orcids_dict, coauthor_counts, error)
         - keywords_dict maps keyword to weight (1-10)
         - titles is the list of raw publication titles (for AI summary)
         - works_meta is a list of {"title": str, "year": int | None} dicts, one per
           publication, in ORCID order (most-recent first for most profiles)
         - coauthor_orcids_dict maps ORCID ID -> display name for co-authors who have ORCIDs;
           a plain name list for those without ORCIDs is folded into the dict with "" keys
+        - coauthor_counts maps display name -> number of shared-paper appearances
         - error is None on success or an error string on failure
-        Returns (None, None, None, None, error_str) on failure.
+        Returns (None, None, None, None, None, error_str) on failure.
 
     Note on author-position data: the ORCID /works summary endpoint does not reliably
     return contributor sequences. works_meta therefore omits author position — callers
@@ -398,12 +408,13 @@ def fetch_orcid_works(orcid_id: str) -> tuple[dict | None, list[str] | None, lis
         )
         resp.raise_for_status()
     except Exception as e:
-        return None, None, None, None, str(e)
+        return None, None, None, None, None, str(e)
 
     titles: list[str] = []
     works_meta: list[dict] = []
     # orcid_id -> name for co-authors with ORCIDs; name -> "" for those without
     coauthor_map: dict[str, str] = {}
+    coauthor_counts: Counter[str] = Counter()
     name_appearances: Counter[str] = Counter()
 
     for group in resp.json().get("group", []):
@@ -434,12 +445,14 @@ def fetch_orcid_works(orcid_id: str) -> tuple[dict | None, list[str] | None, lis
                 contrib_orcid = ((contrib.get("contributor-orcid") or {}).get("path") or "").strip()
                 if contrib_orcid and contrib_orcid != orcid_id:
                     coauthor_map[contrib_orcid] = name
+                    coauthor_counts[name] += 1
                 elif name:
                     name_appearances[name] += 1
+                    coauthor_counts[name] += 1
             break  # First summary per group is sufficient for titles
 
     if not titles:
-        return None, None, None, None, "No publications found on this ORCID profile."
+        return None, None, None, None, None, "No publications found on this ORCID profile."
 
     # Add name-only co-authors who appeared in 2+ papers (reduces noise)
     for name, count in name_appearances.items():
@@ -474,13 +487,14 @@ def fetch_orcid_works(orcid_id: str) -> tuple[dict | None, list[str] | None, lis
         for term, count in combined.most_common(20):
             keywords[term] = max(1, round(10 * count / max_count))
 
-    return keywords, titles, works_meta, coauthor_map, None
+    return keywords, titles, works_meta, coauthor_map, dict(coauthor_counts), None
 
 
 def find_au_colleagues(
     coauthor_map: dict[str, str],
+    coauthor_counts: dict[str, int] | None = None,
     institution: str = "Aarhus University",
-    max_checks: int = 20,
+    max_checks: int = 50,
 ) -> list[str]:
     """
     Filter co-authors to those affiliated with the given institution.
@@ -491,6 +505,7 @@ def find_au_colleagues(
 
     Args:
         coauthor_map: dict returned by fetch_orcid_works (orcid_id -> name, or __name__name -> name)
+        coauthor_counts: optional display-name frequency map from fetch_orcid_works
         institution: institution name to match (case-insensitive substring)
         max_checks: max number of ORCID lookups to perform
 
@@ -507,6 +522,12 @@ def find_au_colleagues(
 
     inst_lower = institution.lower()
     au_colleagues: list[str] = []
+    counts = coauthor_counts or {}
+
+    ranked_candidates = sorted(
+        candidates.items(),
+        key=lambda item: (-counts.get(item[1], 0), item[1].lower()),
+    )[:max_checks]
 
     def _check(orcid_id: str, name: str) -> str | None:
         _, emp_institution, error = fetch_orcid_person(orcid_id)
@@ -517,7 +538,7 @@ def find_au_colleagues(
     with ThreadPoolExecutor(max_workers=8) as pool:
         futures = {
             pool.submit(_check, oid, nm): nm
-            for oid, nm in list(candidates.items())[:max_checks]
+            for oid, nm in ranked_candidates
         }
         for future in as_completed(futures):
             result = future.result()

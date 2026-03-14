@@ -11,6 +11,7 @@ import os
 import re
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 import yaml
@@ -109,6 +110,405 @@ def _weight_label(w: int) -> str:
     if w <= 8:
         return "main field"
     return "everything"
+
+
+# ─────────────────────────────────────────────────────────────
+#  Mini setup presets (no ORCID)
+# ─────────────────────────────────────────────────────────────
+
+ASTRO_MINI_TRACKS = {
+    "general_astronomy": {
+        "label": "General astronomy",
+        "blurb": "A broad weekly round-up across the biggest astronomy categories.",
+        "categories": [
+            "astro-ph.EP",
+            "astro-ph.SR",
+            "astro-ph.GA",
+            "astro-ph.CO",
+            "astro-ph.HE",
+            "astro-ph.IM",
+        ],
+        "keywords": {
+            "astronomy": 8,
+            "astrophysics": 8,
+            "observations": 5,
+            "survey": 5,
+            "telescope": 4,
+        },
+    },
+    "exoplanets": {
+        "label": "Exoplanets",
+        "blurb": "Planets, atmospheres, orbital architectures, and habitability.",
+        "categories": ["astro-ph.EP"],
+        "keywords": {
+            "exoplanet": 10,
+            "planet atmosphere": 8,
+            "transit": 7,
+            "radial velocity": 7,
+            "habitability": 5,
+            "JWST": 4,
+        },
+    },
+    "stars": {
+        "label": "Stars",
+        "blurb": "Stellar physics, rotation, binaries, variability, and populations.",
+        "categories": ["astro-ph.SR"],
+        "keywords": {
+            "stellar": 10,
+            "stellar evolution": 8,
+            "binary star": 7,
+            "asteroseismology": 6,
+            "rotation": 6,
+            "spectroscopy": 5,
+        },
+    },
+    "galaxies": {
+        "label": "Galaxies",
+        "blurb": "Galaxy formation, star formation, AGN, and the Milky Way.",
+        "categories": ["astro-ph.GA"],
+        "keywords": {
+            "galaxy": 10,
+            "milky way": 7,
+            "star formation": 7,
+            "AGN": 6,
+            "dark matter": 6,
+            "quasar": 5,
+        },
+    },
+    "cosmology": {
+        "label": "Cosmology",
+        "blurb": "Large-scale structure, dark energy, inflation, and early-universe physics.",
+        "categories": ["astro-ph.CO"],
+        "keywords": {
+            "cosmology": 10,
+            "dark energy": 8,
+            "inflation": 7,
+            "CMB": 7,
+            "large-scale structure": 7,
+            "gravitational lensing": 5,
+        },
+    },
+    "high_energy": {
+        "label": "High-energy astrophysics",
+        "blurb": "Black holes, neutron stars, transients, and compact objects.",
+        "categories": ["astro-ph.HE"],
+        "keywords": {
+            "black hole": 9,
+            "neutron star": 8,
+            "supernova": 7,
+            "gamma-ray": 6,
+            "X-ray": 6,
+            "gravitational wave": 6,
+        },
+    },
+    "instrumentation": {
+        "label": "Instrumentation",
+        "blurb": "Telescopes, detectors, surveys, pipelines, and observing methods.",
+        "categories": ["astro-ph.IM"],
+        "keywords": {
+            "instrumentation": 9,
+            "telescope": 8,
+            "detector": 7,
+            "survey": 6,
+            "pipeline": 6,
+            "calibration": 5,
+        },
+    },
+}
+
+
+def _merge_mini_keywords(track_ids: list[str]) -> dict[str, int]:
+    """Merge preset keyword weights, keeping the highest weight per term."""
+    merged: dict[str, int] = {}
+    for track_id in track_ids:
+        for keyword, weight in ASTRO_MINI_TRACKS.get(track_id, {}).get(
+            "keywords", {}
+        ).items():
+            merged[keyword] = max(merged.get(keyword, 0), weight)
+    return dict(sorted(merged.items(), key=lambda item: (-item[1], item[0].lower())))
+
+
+def _merge_keyword_weights(*keyword_maps: dict[str, int]) -> dict[str, int]:
+    """Merge weighted keywords, keeping the highest weight per term."""
+    merged: dict[str, int] = {}
+    for keyword_map in keyword_maps:
+        for keyword, weight in (keyword_map or {}).items():
+            clean = str(keyword).strip()
+            if not clean:
+                continue
+            merged[clean] = max(merged.get(clean, 0), int(weight))
+    return dict(sorted(merged.items(), key=lambda item: (-item[1], item[0].lower())))
+
+
+def _dedupe_titles(*title_lists: list[str]) -> list[str]:
+    """Deduplicate titles while preserving the first-seen order."""
+    seen: set[str] = set()
+    merged: list[str] = []
+    for title_list in title_lists:
+        for title in title_list or []:
+            clean = title.strip()
+            if clean and clean not in seen:
+                seen.add(clean)
+                merged.append(clean)
+    return merged
+
+
+def _merge_works_meta(*meta_lists: list[dict]) -> list[dict]:
+    """Merge ORCID work metadata and keep the most recent year per title."""
+    ordered_titles: list[str] = []
+    by_title: dict[str, dict] = {}
+    for meta_list in meta_lists:
+        for entry in meta_list or []:
+            title = str(entry.get("title", "")).strip()
+            if not title:
+                continue
+            if title not in by_title:
+                ordered_titles.append(title)
+                by_title[title] = {"title": title, "year": entry.get("year")}
+                continue
+            existing_year = by_title[title].get("year")
+            incoming_year = entry.get("year")
+            if existing_year is None or (
+                incoming_year is not None and incoming_year > existing_year
+            ):
+                by_title[title]["year"] = incoming_year
+    return [by_title[title] for title in ordered_titles]
+
+
+def _merge_coauthor_maps(*coauthor_maps: dict[str, str]) -> dict[str, str]:
+    """Merge co-author maps, keeping the latest non-empty display name per ORCID."""
+    merged: dict[str, str] = {}
+    for coauthor_map in coauthor_maps:
+        for orcid_id, name in (coauthor_map or {}).items():
+            clean_name = str(name).strip()
+            if not orcid_id or not clean_name:
+                continue
+            merged[orcid_id] = clean_name
+    return merged
+
+
+def _merge_coauthor_counts(*count_maps: dict[str, int]) -> dict[str, int]:
+    """Merge co-author frequency maps by summing counts per display name."""
+    counts: Counter[str] = Counter()
+    for count_map in count_maps:
+        counts.update({name: int(count) for name, count in (count_map or {}).items()})
+    return dict(counts)
+
+
+def _name_match_patterns(full_name: str) -> list[str]:
+    """Return arXiv-friendly match patterns for a person name."""
+    clean = " ".join(full_name.split()).strip()
+    if not clean:
+        return []
+    patterns = [clean]
+    parts = clean.split()
+    if len(parts) >= 2:
+        patterns.append(f"{parts[-1]}, {parts[0][0]}")
+    return list(dict.fromkeys(patterns))
+
+
+def _group_member_names(extra_name: str = "") -> set[str]:
+    """Return the lower-cased imported group member names."""
+    names = {
+        str(member.get("name", "")).strip().lower()
+        for member in st.session_state.get("group_orcid_members", [])
+        if str(member.get("name", "")).strip()
+    }
+    if extra_name.strip():
+        names.add(extra_name.strip().lower())
+    return names
+
+
+def _set_selected_papers(titles: list[str]) -> None:
+    """Keep the paper multiselect widget and backing state in sync."""
+    selection = _dedupe_titles(titles)
+    st.session_state.selected_papers = selection
+    st.session_state["paper_selector_widget"] = selection
+
+
+def _build_mini_research_context(track_ids: list[str]) -> str:
+    """Return a simple weekly student-facing research context from selected tracks."""
+    labels = [ASTRO_MINI_TRACKS[t]["label"] for t in track_ids if t in ASTRO_MINI_TRACKS]
+    if not labels:
+        labels = [ASTRO_MINI_TRACKS["general_astronomy"]["label"]]
+    if len(labels) == 1:
+        focus = labels[0]
+        return (
+            f"I am a student following {focus.lower()}. "
+            "Please prioritise the most important and readable new astronomy papers in this area each week. "
+            "Favour major discoveries, strong review-style papers, landmark observations, and papers likely to matter for learning the field."
+        )
+    focus = ", ".join(labels[:-1]) + f", and {labels[-1]}"
+    return (
+        f"I am a student following astronomy topics including {focus.lower()}. "
+        "Please prioritise the most important and readable new papers each week. "
+        "Favour major discoveries, strong review-style papers, landmark observations, and papers likely to matter for learning the field."
+    )
+
+
+def _build_mini_student_config(
+    track_ids: list[str], smtp_server: str, smtp_port: int, github_repo: str
+) -> tuple[dict, str]:
+    """Build a minimal weekly astronomy-student config and matching cron expression."""
+    selected = track_ids or ["general_astronomy"]
+    categories: list[str] = []
+    for track_id in selected:
+        for category in ASTRO_MINI_TRACKS.get(track_id, {}).get("categories", []):
+            if category not in categories:
+                categories.append(category)
+
+    keywords = _merge_mini_keywords(selected)
+    labels = [ASTRO_MINI_TRACKS[t]["label"] for t in selected if t in ASTRO_MINI_TRACKS]
+    display_name = labels[0] if len(labels) == 1 else "Astronomy"
+    digest_name = f"{display_name} Weekly"
+
+    config = {
+        "digest_name": digest_name,
+        "researcher_name": display_name,
+        "research_context": _build_mini_research_context(selected),
+        "categories": categories,
+        "keywords": keywords,
+        "self_match": [],
+        "research_authors": [],
+        "colleagues": {"people": [], "institutions": []},
+        "digest_mode": "highlights",
+        "recipient_view_mode": "5_min_skim",
+        "days_back": 8,
+        "schedule": "weekly",
+        "send_hour_utc": 7,
+        "institution": "",
+        "department": "",
+        "tagline": "",
+        "smtp_server": smtp_server,
+        "smtp_port": smtp_port,
+        "github_repo": github_repo or "",
+        "max_papers": 5,
+        "min_score": 5,
+    }
+    return config, "0 7 * * 1"
+
+
+def render_mini_setup() -> None:
+    """Render a separate mini setup flow for students without ORCID."""
+    st.markdown("## Mini setup — no ORCID")
+    st.markdown(
+        "For students who do not have an ORCID yet. Pick a few astronomy interests and get a simple weekly digest of the most important papers in those areas."
+    )
+
+    selected_tracks = st.multiselect(
+        "Astronomy interests",
+        options=list(ASTRO_MINI_TRACKS.keys()),
+        default=["general_astronomy"],
+        format_func=lambda key: ASTRO_MINI_TRACKS[key]["label"],
+        help="Choose one or more areas you want to follow.",
+    )
+    if not selected_tracks:
+        st.info("Pick at least one interest to generate a mini config.")
+        return
+
+    if "general_astronomy" in selected_tracks and len(selected_tracks) > 1:
+        st.caption(
+            "General astronomy overlaps the more specific tracks below, so the digest will stay broad."
+        )
+
+    st.markdown("**What this mini setup will do**")
+    st.caption(
+        "Weekly on Monday, 5-minute skim format, up to 5 papers, and no profile import or name matching."
+    )
+
+    with st.expander("Selected tracks", expanded=True):
+        for track_id in selected_tracks:
+            track = ASTRO_MINI_TRACKS[track_id]
+            st.markdown(f"**{track['label']}**")
+            st.caption(track["blurb"])
+
+    smtp_options = {
+        "Gmail": ("smtp.gmail.com", 587),
+        "Outlook / Office 365": ("smtp.office365.com", 587),
+    }
+    smtp_choice = st.radio(
+        "SMTP provider",
+        options=list(smtp_options.keys()),
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+    smtp_server, smtp_port = smtp_options[smtp_choice]
+
+    github_repo = st.text_input(
+        "GitHub repo (optional)",
+        placeholder="username/arxiv-digest",
+        help="Enables self-service links in emails",
+        key="mini_github_repo",
+    )
+
+    config, cron_expr = _build_mini_student_config(
+        selected_tracks, smtp_server, smtp_port, github_repo
+    )
+    config_yaml = yaml.dump(
+        config, default_flow_style=False, sort_keys=False, allow_unicode=True
+    )
+
+    st.markdown("### Your config.yaml is ready")
+    tab1, tab2 = st.tabs(["config.yaml", "Workflow cron"])
+
+    with tab1:
+        st.code(config_yaml, language="yaml")
+
+    with tab2:
+        st.markdown(
+            "Use this cron line in `.github/workflows/digest.yml` for the student mini setup:"
+        )
+        st.code(
+            "    - cron: '0 7 * * 1'  # Once a week (Monday) at 07:00 UTC",
+            language="yaml",
+        )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.download_button(
+            label="📥 Download config.yaml",
+            data=config_yaml,
+            file_name="config.yaml",
+            mime="text/yaml",
+            type="primary",
+            use_container_width=True,
+        )
+    with col2:
+        if st.button("📋 Copy to clipboard", use_container_width=True, key="mini_copy"):
+            st.code(config_yaml, language="yaml")
+            st.info("Select all text above and copy (Ctrl/Cmd+C)")
+
+    st.divider()
+    st.markdown("## Next Steps")
+    st.markdown(
+        f"""
+<div class="brand-card">
+<p><span class="step-number">1</span> <strong>Fork the template repo</strong></p>
+<p style="margin-left: 36px;">
+Fork <a href="https://github.com/SilkeDainese/arxiv-silke" target="_blank">SilkeDainese/arxiv-silke</a>.
+</p>
+
+<p><span class="step-number">2</span> <strong>Upload your config.yaml</strong></p>
+<p style="margin-left: 36px;">
+In your fork, click <strong>Add file → Upload files</strong> and upload the <code>config.yaml</code>
+you just downloaded.
+</p>
+
+<p><span class="step-number">3</span> <strong>Add secrets</strong></p>
+<p style="margin-left: 36px;">
+Add <code>RECIPIENT_EMAIL</code>, <code>SMTP_USER</code>, and <code>SMTP_PASSWORD</code> in your fork’s
+<strong>Settings → Secrets and variables → Actions</strong>.
+</p>
+
+<p><span class="step-number">4</span> <strong>Switch the workflow to weekly</strong></p>
+<p style="margin-left: 36px;">
+Replace the cron line in <code>.github/workflows/digest.yml</code> with:
+</p>
+<pre style="margin-left: 36px;"><code>    - cron: '{cron_expr}'</code></pre>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1478,15 +1878,18 @@ def suggest_keywords_from_context(
 def _apply_orcid_keywords(keywords: dict, orcid_url: str = "") -> None:
     """Merge ORCID keywords into session state and auto-draft description."""
     if keywords:
-        merged = dict(st.session_state.keywords)
-        merged.update(keywords)
-        st.session_state.keywords = merged
+        st.session_state.keywords = _merge_keyword_weights(
+            st.session_state.keywords, keywords
+        )
         if not st.session_state.research_description:
             if _ai_available():
-                _drafted = draft_research_description(merged)
+                _drafted = draft_research_description(st.session_state.keywords)
             else:
                 _top_kws = [
-                    k for k, _ in sorted(merged.items(), key=lambda x: -x[1])[:5]
+                    k
+                    for k, _ in sorted(
+                        st.session_state.keywords.items(), key=lambda x: -x[1]
+                    )[:5]
                 ]
                 _drafted = (
                     f"My research focuses on {', '.join(_top_kws)}." if _top_kws else ""
@@ -1520,6 +1923,69 @@ def _apply_pure_keywords(keywords: dict | None, coauthors: list | None) -> None:
     st.session_state.pure_scanned = True
 
 
+def _maybe_seed_research_description(
+    research_summary: str = "",
+    keywords: dict | None = None,
+    titles: list[str] | None = None,
+) -> None:
+    """Seed the editable research description if the user has not written one yet."""
+    if st.session_state.research_description:
+        return
+
+    drafted = ""
+    if research_summary:
+        drafted = research_summary
+    elif keywords:
+        if _ai_available():
+            drafted = draft_research_description(keywords)
+        else:
+            top_keywords = [k for k, _ in sorted(keywords.items(), key=lambda x: -x[1])[:5]]
+            drafted = (
+                f"My research focuses on {', '.join(top_keywords)}."
+                if top_keywords
+                else ""
+            )
+    elif titles:
+        top_titles = list(titles)[:5]
+        words: list[str] = []
+        stopwords = {
+            "a",
+            "an",
+            "the",
+            "of",
+            "in",
+            "on",
+            "at",
+            "to",
+            "for",
+            "and",
+            "or",
+            "with",
+            "from",
+            "by",
+            "is",
+            "are",
+            "using",
+        }
+        for title in top_titles:
+            for word in title.split():
+                clean = re.sub(r"[^a-zA-Z\\-]", "", word)
+                if len(clean) > 4 and clean.lower() not in stopwords:
+                    words.append(clean)
+        unique_words = list(dict.fromkeys(words))[:6]
+        if unique_words:
+            drafted = (
+                f"My research focuses on {', '.join(unique_words[:-1])}, and {unique_words[-1]}. "
+                f"These topics span my recent publications in areas including "
+                f"{', '.join(w.lower() for w in unique_words[:3])}."
+            )
+
+    if drafted:
+        st.session_state.research_description = drafted
+        st.session_state._research_description_val = drafted
+        st.session_state["research_description_widget"] = drafted
+
+
 def _import_profile(result: dict) -> None:
     """Full import from a single ORCID search result: fill profile + extract keywords."""
     # Pre-fill profile fields
@@ -1530,12 +1996,22 @@ def _import_profile(result: dict) -> None:
 
     # Extract keywords from publications
     orcid_id = result["url"].rstrip("/").split("/")[-1]
-    keywords, _titles, _works_meta, _coauthor_map, error = fetch_orcid_works(orcid_id)
+    (
+        keywords,
+        _titles,
+        _works_meta,
+        _coauthor_map,
+        _coauthor_counts,
+        error,
+    ) = fetch_orcid_works(orcid_id)
     # Persist titles, works meta, and coauthor map for paper selector and suggested colleagues
     st.session_state["_orcid_titles"] = _titles or []
     st.session_state["_orcid_works_meta"] = _works_meta or []
     st.session_state["_orcid_coauthor_map"] = (
         dict(_coauthor_map) if _coauthor_map else {}
+    )
+    st.session_state["_orcid_coauthor_counts"] = (
+        dict(_coauthor_counts) if _coauthor_counts else {}
     )
     if not error and keywords:
         _apply_orcid_keywords(keywords, orcid_url=result["url"])
@@ -1623,9 +2099,15 @@ if "_research_description_val" not in st.session_state:
 # Wizard step tracking — 1-indexed, controls which expander is open
 if "current_step" not in st.session_state:
     st.session_state.current_step = 1
+if "profile_mode" not in st.session_state:
+    st.session_state.profile_mode = "individual"
 # Paper selector: subset of fetched ORCID titles to use for keyword/category AI suggestions
 if "selected_papers" not in st.session_state:
     st.session_state.selected_papers = []
+if "_orcid_coauthor_counts" not in st.session_state:
+    st.session_state["_orcid_coauthor_counts"] = {}
+if "group_orcid_members" not in st.session_state:
+    st.session_state.group_orcid_members = []
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1647,6 +2129,21 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
+
+setup_mode = st.radio(
+    "Setup mode",
+    options=["full_researcher", "mini_no_orcid"],
+    format_func=lambda mode: {
+        "full_researcher": "Researcher setup — ORCID, profile import, fine control",
+        "mini_no_orcid": "Mini setup — no ORCID, just pick astronomy interests",
+    }[mode],
+    horizontal=True,
+    label_visibility="collapsed",
+)
+
+if setup_mode == "mini_no_orcid":
+    render_mini_setup()
+    st.stop()
 
 # ── AI setup — server key (no user key needed) or bring-your-own ──
 if _has_server_key():
@@ -1719,6 +2216,18 @@ ai_assist = True  # AI is always on when we reach this point
 
 st.divider()
 
+profile_mode = st.radio(
+    "Who is this digest for?",
+    options=["individual", "group"],
+    format_func=lambda mode: {
+        "individual": "Individual researcher",
+        "group": "Research group / journal club",
+    }[mode],
+    horizontal=True,
+    index=0 if st.session_state.profile_mode == "individual" else 1,
+)
+st.session_state.profile_mode = profile_mode
+
 
 # ─────────────────────────────────────────────────────────────
 #  Section 1: Profile Scan (optional)
@@ -1737,69 +2246,14 @@ def _commit_preview() -> None:
     p = st.session_state.orcid_preview
     if not p:
         return
-    st.session_state.profile_name = p["name"]
-    st.session_state.profile_institution = p["institution"]
-    st.session_state.pure_confirmed_url = p["orcid_url"]
 
-    if p["keywords"]:
-        merged = dict(st.session_state.keywords)
-        merged.update(p["keywords"])
-        st.session_state.keywords = merged
+    full_name = p.get("name", "").strip()
+    member_name_blocklist = _group_member_names(full_name)
 
-    # Research description: prefer the AI summary from titles; fall back to keywords;
-    # final fallback is a simple sentence built from the top-5 title words.
-    # Write to ALL three keys: the backing store, the shadow key, AND the widget's
-    # own session-state key — because Streamlit ignores value= after the first render
-    # and reads st.session_state["research_description_widget"] directly.
-    if not st.session_state.research_description:
-        _drafted = ""
-        if p.get("research_summary"):
-            _drafted = p["research_summary"]
-        elif p["keywords"]:
-            _drafted = draft_research_description(p["keywords"])
-        elif p.get("titles"):
-            # No AI and no keywords: build a minimal fallback from paper titles.
-            _top_titles = p["titles"][:5]
-            _words = []
-            _stopwords = {
-                "a",
-                "an",
-                "the",
-                "of",
-                "in",
-                "on",
-                "at",
-                "to",
-                "for",
-                "and",
-                "or",
-                "with",
-                "from",
-                "by",
-                "is",
-                "are",
-                "using",
-            }
-            for _t in _top_titles:
-                for _w in _t.split():
-                    _clean = re.sub(r"[^a-zA-Z\-]", "", _w)
-                    if len(_clean) > 4 and _clean.lower() not in _stopwords:
-                        _words.append(_clean)
-            _unique = list(dict.fromkeys(_words))[:6]  # preserve order, dedupe
-            if _unique:
-                _drafted = (
-                    f"My research focuses on {', '.join(_unique[:-1])}, and {_unique[-1]}. "
-                    f"These topics span my recent publications in areas including "
-                    f"{', '.join(w.lower() for w in _unique[:3])}."
-                )
-        if _drafted:
-            st.session_state.research_description = _drafted
-            st.session_state._research_description_val = _drafted
-            # Also write to the widget key directly so Streamlit renders it after rerun
-            st.session_state["research_description_widget"] = _drafted
-
-    # Add confirmed AU colleagues
+    # Add confirmed AU colleagues, excluding imported group members.
     for name in p.get("selected_colleagues", []):
+        if name.strip().lower() in member_name_blocklist:
+            continue
         parts = name.split()
         if len(parts) >= 2:
             match_pattern = f"{parts[-1]}, {parts[0][0]}"
@@ -1810,42 +2264,153 @@ def _commit_preview() -> None:
                 {"name": name, "match": [match_pattern]}
             )
 
-    # Auto-populate self-match from ORCID name
-    full_name = p.get("name", "").strip()
-    if full_name:
-        parts = full_name.split()
-        if len(parts) >= 2:
-            # "Alfred Jones" → "Jones, A"
-            arxiv_pattern = f"{parts[-1]}, {parts[0][0]}"
-            if arxiv_pattern not in st.session_state.self_match:
-                st.session_state.self_match.append(arxiv_pattern)
+    if st.session_state.get("profile_mode") == "group":
+        imported_members = list(st.session_state.get("group_orcid_members", []))
+        if not any(m.get("orcid_url") == p["orcid_url"] for m in imported_members):
+            imported_members.append(
+                {
+                    "name": full_name,
+                    "institution": p.get("institution", ""),
+                    "orcid_url": p["orcid_url"],
+                    "paper_count": len(p.get("titles", [])),
+                }
+            )
+        st.session_state.group_orcid_members = imported_members
 
-    # Persist paper titles, works meta, and coauthor map for use in Section 3 (paper
-    # selector) and Section 7 (suggested colleagues). Store even if empty so downstream
-    # code can check without KeyError.
-    st.session_state["_orcid_titles"] = p.get("titles", [])
-    st.session_state["_orcid_works_meta"] = p.get("works_meta", [])
-    st.session_state["_orcid_coauthor_map"] = p.get("coauthor_map", {})
+        if p["keywords"]:
+            st.session_state.keywords = _merge_keyword_weights(
+                st.session_state.keywords, p["keywords"]
+            )
 
-    st.session_state.pure_scanned = True
+        for pattern in _name_match_patterns(full_name):
+            if pattern not in st.session_state.self_match:
+                st.session_state.self_match.append(pattern)
+
+        st.session_state.colleagues_people = [
+            colleague
+            for colleague in st.session_state.colleagues_people
+            if colleague.get("name", "").strip().lower()
+            not in _group_member_names()
+        ]
+
+        st.session_state["_orcid_titles"] = _dedupe_titles(
+            st.session_state.get("_orcid_titles", []), p.get("titles", [])
+        )
+        st.session_state["_orcid_works_meta"] = _merge_works_meta(
+            st.session_state.get("_orcid_works_meta", []), p.get("works_meta", [])
+        )
+        st.session_state["_orcid_coauthor_map"] = _merge_coauthor_maps(
+            st.session_state.get("_orcid_coauthor_map", {}), p.get("coauthor_map", {})
+        )
+        st.session_state["_orcid_coauthor_counts"] = _merge_coauthor_counts(
+            st.session_state.get("_orcid_coauthor_counts", {}),
+            p.get("coauthor_counts", {}),
+        )
+        st.session_state.selected_papers = [
+            title
+            for title in st.session_state.selected_papers
+            if title in st.session_state["_orcid_titles"]
+        ]
+
+        if not st.session_state.profile_institution and p.get("institution"):
+            st.session_state.profile_institution = p["institution"]
+        if not st.session_state.profile_name:
+            st.session_state.profile_name = "Research Group"
+        st.session_state.pure_confirmed_url = (
+            f"{len(imported_members)} ORCID"
+            f"{'' if len(imported_members) == 1 else 's'} imported"
+        )
+        _maybe_seed_research_description(
+            research_summary=p.get("research_summary", ""),
+            keywords=st.session_state.keywords,
+            titles=st.session_state.get("_orcid_titles", []),
+        )
+        st.session_state.pure_scanned = bool(imported_members)
+    else:
+        st.session_state.profile_name = full_name
+        st.session_state.profile_institution = p["institution"]
+        st.session_state.pure_confirmed_url = p["orcid_url"]
+
+        if p["keywords"]:
+            st.session_state.keywords = _merge_keyword_weights(
+                st.session_state.keywords, p["keywords"]
+            )
+
+        for pattern in _name_match_patterns(full_name):
+            if pattern not in st.session_state.self_match:
+                st.session_state.self_match.append(pattern)
+
+        st.session_state["_orcid_titles"] = p.get("titles", [])
+        st.session_state["_orcid_works_meta"] = p.get("works_meta", [])
+        st.session_state["_orcid_coauthor_map"] = p.get("coauthor_map", {})
+        st.session_state["_orcid_coauthor_counts"] = p.get("coauthor_counts", {})
+        _maybe_seed_research_description(
+            research_summary=p.get("research_summary", ""),
+            keywords=p.get("keywords", {}),
+            titles=p.get("titles", []),
+        )
+        st.session_state.pure_scanned = True
+
     st.session_state.orcid_preview = None
 
 
 with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step == 1)):
-    st.markdown(
-        "Enter your ORCID ID — we'll pull your profile and publications automatically."
-    )
+    if profile_mode == "group":
+        st.markdown(
+            "ORCID import is optional for groups. You can skip this step and configure the group manually, or import up to 8 member ORCIDs to bootstrap shared keywords, categories, and colleague suggestions."
+        )
+    else:
+        st.markdown(
+            "Enter your ORCID ID — we'll pull your profile and publications automatically."
+        )
 
-    # ── Already confirmed — show summary and allow reset ──
-    if st.session_state.pure_scanned:
+    group_members = st.session_state.get("group_orcid_members", [])
+    max_group_orcids = 8
+
+    if profile_mode == "group":
+        if group_members:
+            st.success(
+                f"✓ Imported {len(group_members)} member ORCID"
+                f"{'' if len(group_members) == 1 else 's'}"
+            )
+            for member in group_members:
+                paper_count = int(member.get("paper_count", 0))
+                paper_label = "paper" if paper_count == 1 else "papers"
+                st.caption(
+                    f"• {member.get('name', 'Unknown member')} · {member.get('institution', 'No institution listed')} · {paper_count} {paper_label}"
+                )
+            if st.button("↺ Clear imported ORCIDs", type="secondary"):
+                st.session_state.pure_scanned = False
+                st.session_state.pure_confirmed_url = ""
+                st.session_state.orcid_preview = None
+                st.session_state.group_orcid_members = []
+                st.session_state["_orcid_titles"] = []
+                st.session_state["_orcid_works_meta"] = []
+                st.session_state["_orcid_coauthor_map"] = {}
+                st.session_state["_orcid_coauthor_counts"] = {}
+                _set_selected_papers([])
+                st.rerun()
+        else:
+            st.caption(
+                "Optional: import a few representative members to seed the group digest automatically."
+            )
+    elif st.session_state.pure_scanned:
         st.success(f"✓ Profile loaded from {st.session_state.pure_confirmed_url}")
         if st.button("↺ Use a different ORCID", type="secondary"):
             st.session_state.pure_scanned = False
             st.session_state.pure_confirmed_url = ""
             st.session_state.orcid_preview = None
+            st.session_state["_orcid_titles"] = []
+            st.session_state["_orcid_works_meta"] = []
+            st.session_state["_orcid_coauthor_map"] = {}
+            st.session_state["_orcid_coauthor_counts"] = {}
+            _set_selected_papers([])
             st.rerun()
 
-    else:
+    can_add_group_member = len(group_members) < max_group_orcids
+    show_import_controls = profile_mode == "group" or not st.session_state.pure_scanned
+
+    if show_import_controls:
         # ── ORCID input ──
         col_input, col_btn = st.columns([5, 1])
         with col_input:
@@ -1857,7 +2422,15 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
             )
         with col_btn:
             fetch_clicked = st.button(
-                "🔍 Fetch", type="primary", use_container_width=True
+                "🔍 Fetch" if profile_mode == "individual" else "＋ Add",
+                type="primary",
+                use_container_width=True,
+                disabled=profile_mode == "group" and not can_add_group_member,
+            )
+
+        if profile_mode == "group" and not can_add_group_member:
+            st.caption(
+                f"Imported {max_group_orcids} ORCIDs already. Continue, or clear them and start over."
             )
 
         if orcid_input and fetch_clicked:
@@ -1879,7 +2452,14 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
             if orcid_id:
                 with st.spinner("Fetching profile and publications from ORCID..."):
                     full_name, institution, person_error = fetch_orcid_person(orcid_id)
-                    keywords, titles, works_meta, coauthor_map, works_error = (
+                    (
+                        keywords,
+                        titles,
+                        works_meta,
+                        coauthor_map,
+                        coauthor_counts,
+                        works_error,
+                    ) = (
                         fetch_orcid_works(orcid_id)
                     )
 
@@ -1894,6 +2474,7 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
                         ):
                             au_colleagues = find_au_colleagues(
                                 coauthor_map,
+                                coauthor_counts=coauthor_counts,
                                 institution=institution or "Aarhus University",
                             )
 
@@ -1902,6 +2483,34 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
                     if titles and ai_assist:
                         with st.spinner("Summarising your research..."):
                             research_summary = _summarise_research(titles)
+
+                    blocked_names = (
+                        _group_member_names(full_name)
+                        if profile_mode == "group"
+                        else {full_name.strip().lower()}
+                    )
+                    au_colleagues = [
+                        name
+                        for name in au_colleagues
+                        if name.strip().lower() not in blocked_names
+                    ]
+                    sorted_coauthors = (
+                        [
+                            name
+                            for name, _ in sorted(
+                                (coauthor_counts or {}).items(),
+                                key=lambda item: (-item[1], item[0].lower()),
+                            )
+                            if name.strip().lower() not in blocked_names
+                        ]
+                        if coauthor_counts
+                        else []
+                    )
+
+                    if profile_mode == "group" and any(
+                        member.get("orcid_url") == orcid_url for member in group_members
+                    ):
+                        st.info("That ORCID is already imported for this group.")
 
                     st.session_state.orcid_preview = {
                         "name": full_name,
@@ -1912,11 +2521,10 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
                         # Per-paper metadata (title + year) for smart pre-selection
                         "works_meta": works_meta or [],
                         "au_colleagues": au_colleagues,
-                        "all_coauthors": sorted(coauthor_map.values())
-                        if coauthor_map
-                        else [],
+                        "all_coauthors": sorted_coauthors,
                         # Raw coauthor map retained for frequency counting in suggested-colleagues
                         "coauthor_map": dict(coauthor_map) if coauthor_map else {},
+                        "coauthor_counts": dict(coauthor_counts) if coauthor_counts else {},
                         "research_summary": research_summary,
                         # Track which colleagues the user wants to import
                         "selected_colleagues": list(au_colleagues),
@@ -2030,7 +2638,13 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
 
             # Pick from all co-authors on previous papers (already fetched from ORCID)
             all_coauthors = p.get("all_coauthors", [])
-            pickable = [n for n in all_coauthors if n not in p["selected_colleagues"]]
+            _coauthor_blocklist = _group_member_names(p.get("name", ""))
+            pickable = [
+                n
+                for n in all_coauthors
+                if n not in p["selected_colleagues"]
+                and n.strip().lower() not in _coauthor_blocklist
+            ]
             if pickable:
                 with st.expander(
                     f"Or pick from your {len(all_coauthors)} ORCID co-authors"
@@ -2054,14 +2668,22 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
                             f"Showing 30 of {len(filtered)} — type more to narrow."
                         )
 
-            if st.button("✓ Looks good — import", type="primary"):
+            import_label = (
+                "✓ Add this member"
+                if profile_mode == "group"
+                else "✓ Looks good — import"
+            )
+            if st.button(import_label, type="primary"):
                 _commit_preview()
                 st.rerun()
 
     # ── Continue button (always visible at bottom of Section 1) ──
-    if st.button(
-        "Looks good — continue to Step 2 →", key="s1_continue", type="primary"
-    ):
+    _s1_label = (
+        "Skip ORCID — continue to Step 2 →"
+        if profile_mode == "group" and not st.session_state.pure_scanned
+        else "Looks good — continue to Step 2 →"
+    )
+    if st.button(_s1_label, key="s1_continue", type="primary"):
         st.session_state.current_step = 2
         st.rerun()
 
@@ -2073,8 +2695,12 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
 with st.expander("**2. Your Profile**", expanded=(st.session_state.current_step == 2)):
     col1, col2 = st.columns(2)
     with col1:
+        _name_label = "Group / course name" if profile_mode == "group" else "Your name"
+        _name_placeholder = (
+            "AU Exoplanet Group" if profile_mode == "group" else "Jane Smith"
+        )
         researcher_name = st.text_input(
-            "Your name", placeholder="Jane Smith", key="profile_name"
+            _name_label, placeholder=_name_placeholder, key="profile_name"
         )
         institution = st.text_input(
             "Institution (optional)",
@@ -2099,11 +2725,15 @@ with st.expander("**2. Your Profile**", expanded=(st.session_state.current_step 
         help="A quote or motto for the email footer",
     )
 
-    # ── Self-match (your own name on arXiv) ──
-    # This block appears exactly once — here in Section 2.
-    st.markdown(
-        "**Your name on arXiv** — if you publish a paper, you'll get a special celebration in your digest!"
-    )
+    # ── Self-match (optional in group mode) ──
+    if profile_mode == "group":
+        st.markdown(
+            "**Group members on arXiv** — optional. Add author patterns if you want the digest to flag and celebrate papers from anyone in the group."
+        )
+    else:
+        st.markdown(
+            "**Your name on arXiv** — if you publish a paper, you'll get a special celebration in your digest!"
+        )
     col1, col2 = st.columns([3, 1])
     with col1:
         new_self = st.text_input(
@@ -2111,10 +2741,18 @@ with st.expander("**2. Your Profile**", expanded=(st.session_state.current_step 
             placeholder="Smith, J",
             key="self_match_input",
             label_visibility="collapsed",
-            help="How your name appears in arXiv author lists (e.g. 'Smith, J' or 'Jane Smith')",
+            help=(
+                "How a member name appears in arXiv author lists (e.g. 'Smith, J' or 'Jane Smith')"
+                if profile_mode == "group"
+                else "How your name appears in arXiv author lists (e.g. 'Smith, J' or 'Jane Smith')"
+            ),
         )
     with col2:
-        if st.button("Add", key="add_self_match", use_container_width=True):
+        if st.button(
+            "Add pattern" if profile_mode == "group" else "Add",
+            key="add_self_match",
+            use_container_width=True,
+        ):
             if new_self.strip() and new_self.strip() not in st.session_state.self_match:
                 st.session_state.self_match.append(new_self.strip())
                 st.rerun()
@@ -2166,10 +2804,16 @@ with st.expander(
                 "Then hit the button below to suggest categories and score your keywords."
             )
         else:
-            st.markdown(
-                "Describe your research in 3-5 sentences, like you'd tell a colleague. "
-                "We'll use this to **suggest arXiv categories and score keywords** for you."
-            )
+            if profile_mode == "group":
+                st.markdown(
+                    "Describe your group's interests in 3-5 sentences. "
+                    "We'll use this to **suggest arXiv categories and score keywords** for you."
+                )
+            else:
+                st.markdown(
+                    "Describe your research in 3-5 sentences, like you'd tell a colleague. "
+                    "We'll use this to **suggest arXiv categories and score keywords** for you."
+                )
     else:
         st.markdown(
             "Describe your research in 3-5 sentences. This is what the AI uses to score papers."
@@ -2194,12 +2838,13 @@ with st.expander(
         _smart_threshold = (
             10  # use smart pre-selection when user has this many or more papers
         )
+        _paper_context_limit = 30
 
-        def _smart_paper_default(
+        def _sort_titles_by_recency(
             titles: list[str], works_meta: list[dict], cap: int = 10
         ) -> list[str]:
             """
-            Return a smart default selection of up to `cap` papers.
+            Return titles sorted by most recent year, capped to `cap`.
 
             Priority: most-recent first (year descending, None years last).
             Author-position data is not available from the ORCID summary endpoint —
@@ -2232,7 +2877,7 @@ with st.expander(
             # First render or stale state: compute the default
             if _total_papers >= _smart_threshold:
                 _works_meta = st.session_state.get("_orcid_works_meta", [])
-                _default_selection = _smart_paper_default(
+                _default_selection = _sort_titles_by_recency(
                     _orcid_titles, _works_meta, cap=_smart_threshold
                 )
                 _selection_note = (
@@ -2242,9 +2887,12 @@ with st.expander(
             else:
                 _default_selection = list(_orcid_titles)
                 _selection_note = ""
+            _set_selected_papers(_default_selection)
         else:
             _default_selection = _existing
             _selection_note = ""
+            if st.session_state.get("paper_selector_widget") != _existing:
+                st.session_state["paper_selector_widget"] = list(_existing)
 
         st.markdown(
             "**Which papers should we use to suggest your keywords?** (select the most representative ones)"
@@ -2255,14 +2903,70 @@ with st.expander(
             st.caption(
                 "All fetched from your ORCID profile. Deselect papers from unrelated projects."
             )
-
-        _new_selection = st.multiselect(
-            "Papers for keyword suggestions",
-            options=_orcid_titles,
-            default=_default_selection,
-            label_visibility="collapsed",
-            key="paper_selector_widget",
+        st.caption(
+            f"AI uses at most {_paper_context_limit} selected papers for context, prioritising the most recent."
         )
+
+        _current_selection = st.session_state.get("selected_papers", _default_selection)
+        _preview_titles = _sort_titles_by_recency(
+            _current_selection, st.session_state.get("_orcid_works_meta", []), cap=5
+        )
+
+        def _render_paper_selector(expanded: bool) -> list[str]:
+            with st.expander(
+                f"Edit paper selection ({len(st.session_state.get('selected_papers', []))} selected)",
+                expanded=expanded,
+            ):
+                quick_col1, quick_col2, quick_col3, quick_col4 = st.columns(4)
+                with quick_col1:
+                    if st.button("Recent 10", key="paper_recent_10"):
+                        _set_selected_papers(
+                            _sort_titles_by_recency(
+                                _orcid_titles,
+                                st.session_state.get("_orcid_works_meta", []),
+                                cap=10,
+                            )
+                        )
+                        st.rerun()
+                with quick_col2:
+                    if st.button("Recent 30", key="paper_recent_30"):
+                        _set_selected_papers(
+                            _sort_titles_by_recency(
+                                _orcid_titles,
+                                st.session_state.get("_orcid_works_meta", []),
+                                cap=min(30, _total_papers),
+                            )
+                        )
+                        st.rerun()
+                with quick_col3:
+                    if st.button("Select all", key="paper_select_all"):
+                        _set_selected_papers(_orcid_titles)
+                        st.rerun()
+                with quick_col4:
+                    if st.button("Clear", key="paper_clear"):
+                        _set_selected_papers([])
+                        st.rerun()
+
+                return st.multiselect(
+                    "Papers for keyword suggestions",
+                    options=_orcid_titles,
+                    default=_default_selection,
+                    label_visibility="collapsed",
+                    key="paper_selector_widget",
+                )
+
+        if _total_papers >= _smart_threshold:
+            st.caption(
+                f"Currently using {len(_current_selection)} paper"
+                f"{'' if len(_current_selection) == 1 else 's'}."
+            )
+            if _preview_titles:
+                for preview_title in _preview_titles:
+                    st.caption(f"• {preview_title}")
+            _new_selection = _render_paper_selector(expanded=False)
+        else:
+            _new_selection = _render_paper_selector(expanded=True)
+
         st.session_state.selected_papers = _new_selection
         if len(_new_selection) < _total_papers:
             st.caption(f"{len(_new_selection)} of {_total_papers} papers selected.")
@@ -2278,8 +2982,16 @@ with st.expander(
 
         # Build enriched context: research description + selected paper titles (if any)
         _selected_titles = st.session_state.get("selected_papers", [])
-        if _selected_titles:
-            _titles_block = "\n".join(f"- {t}" for t in _selected_titles[:30])
+        _works_meta = st.session_state.get("_orcid_works_meta", [])
+        _effective_titles = _sort_titles_by_recency(
+            _selected_titles, _works_meta, cap=_paper_context_limit
+        )
+        if len(_selected_titles) > _paper_context_limit:
+            st.warning(
+                f"You selected {len(_selected_titles)} papers. AI will use the {_paper_context_limit} most recent selected papers."
+            )
+        if _effective_titles:
+            _titles_block = "\n".join(f"- {t}" for t in _effective_titles)
             _ai_context = (
                 research_context_widget
                 + f"\n\nRepresentative publications:\n{_titles_block}"
@@ -2593,9 +3305,14 @@ with st.expander("**5. Keywords**", expanded=(st.session_state.current_step == 5
 with st.expander(
     "**6. Research Authors**", expanded=(st.session_state.current_step == 6)
 ):
-    st.markdown(
-        "Papers by these people get a relevance boost. Use partial name strings (e.g. 'Madhusudhan')."
-    )
+    if profile_mode == "group":
+        st.markdown(
+            "Papers by these people get a relevance boost. Useful for your lab, reading group, or the researchers your group follows most closely."
+        )
+    else:
+        st.markdown(
+            "Papers by these people get a relevance boost. Use partial name strings (e.g. 'Madhusudhan')."
+        )
 
     new_author = st.text_input(
         "Add research author", placeholder="Madhusudhan", key="new_ra_input"
@@ -2674,23 +3391,25 @@ with st.expander("**7. Colleagues**", expanded=(st.session_state.current_step ==
             st.rerun()
 
     # ── Suggested colleagues — top co-authors from ORCID publications ──
-    _cmap = st.session_state.get("_orcid_coauthor_map", {})
-    if _cmap:
-        from collections import Counter as _Counter
-
-        # Count how many map entries each name appears in (proxy for shared-paper frequency)
-        _name_freq: _Counter = _Counter(_cmap.values())
+    _coauthor_counts = st.session_state.get("_orcid_coauthor_counts", {})
+    if _coauthor_counts:
+        _name_freq = dict(_coauthor_counts)
         # Remove the user themselves by checking against their profile name
         _user_name = st.session_state.get("profile_name", "").strip()
-        if _user_name:
-            for _variant in [_user_name, _user_name.lower()]:
-                _name_freq.pop(_variant, None)
+        _user_name_lower = _user_name.lower() if _user_name else ""
+        _group_member_blocklist = _group_member_names()
         # Exclude names already in colleagues_people
         _already_tracked = {c["name"] for c in st.session_state.colleagues_people}
         _candidates = [
             (name, count)
-            for name, count in _name_freq.most_common(20)
-            if name not in _already_tracked and name.strip()
+            for name, count in sorted(
+                _name_freq.items(), key=lambda item: (-item[1], item[0].lower())
+            )[:20]
+            if name not in _already_tracked
+            and name.strip()
+            and count >= 2
+            and name.lower() != _user_name_lower
+            and name.lower() not in _group_member_blocklist
         ]
         _top_coauthors = _candidates[:5]
 
@@ -2980,7 +3699,8 @@ with st.expander(
     # Build config dict
     config = {
         "digest_name": digest_name or "arXiv Digest",
-        "researcher_name": researcher_name or "Reader",
+        "researcher_name": researcher_name
+        or ("Research Group" if profile_mode == "group" else "Reader"),
         "research_context": research_context or "",
         "categories": categories
         if categories
@@ -3018,6 +3738,15 @@ with st.expander(
         config["max_papers"] = max_papers
     if override_min:
         config["min_score"] = min_score_val
+    if profile_mode == "group" and st.session_state.get("group_orcid_members"):
+        config["group_members"] = [
+            {
+                "name": member.get("name", ""),
+                "institution": member.get("institution", ""),
+                "orcid_url": member.get("orcid_url", ""),
+            }
+            for member in st.session_state.group_orcid_members
+        ]
 
     config_yaml = yaml.dump(
         config, default_flow_style=False, sort_keys=False, allow_unicode=True
@@ -3117,7 +3846,11 @@ if _smtp_user and _smtp_password:
     st.markdown(
         "**Copy these secrets into your fork** (Settings → Secrets and variables → Actions):"
     )
-    _secrets_block = f"RECIPIENT_EMAIL = your-email@example.com  ← change this\nSMTP_USER      = {_smtp_user}\nSMTP_PASSWORD  = {_smtp_password}"
+    _secrets_block = (
+        "RECIPIENT_EMAIL = your-email@example.com  ← one address or comma-separated list\n"
+        f"SMTP_USER      = {_smtp_user}\n"
+        f"SMTP_PASSWORD  = {_smtp_password}"
+    )
     if not _server_gemini:
         _secrets_block += (
             "\nGEMINI_API_KEY = your-key  ← get free at aistudio.google.com"
@@ -3126,7 +3859,7 @@ if _smtp_user and _smtp_password:
     st.caption(
         "Emails will be sent from **"
         + _smtp_user
-        + "**. Change only the `RECIPIENT_EMAIL` line to your own address."
+        + "**. Change only the `RECIPIENT_EMAIL` line to your own address, or use a comma-separated list for a group."
     )
 else:
     # No server SMTP — user configures their own
@@ -3134,7 +3867,7 @@ else:
         "**Add these secrets to your fork** (Settings → Secrets and variables → Actions):"
     )
     st.code(
-        "RECIPIENT_EMAIL = your-email@example.com\n"
+        "RECIPIENT_EMAIL = your-email@example.com  ← or alice@example.com, bob@example.com\n"
         "SMTP_USER       = your-gmail@gmail.com\n"
         "SMTP_PASSWORD   = your-app-password  ← not your login password!\n"
         "GEMINI_API_KEY  = AIza...             ← optional, for AI scoring",

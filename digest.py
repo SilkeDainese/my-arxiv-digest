@@ -75,6 +75,7 @@ def load_config() -> dict[str, Any]:
     cfg.setdefault("digest_mode", "highlights")  # "highlights" or "in_depth"
     cfg.setdefault("recipient_view_mode", "deep_read")  # "deep_read" or "5_min_skim"
     cfg.setdefault("self_match", [])  # patterns to match YOUR name in author lists
+    cfg.setdefault("keyword_aliases", {})  # optional keyword -> [similar phrases]
 
     # ── Existing fields with defaults ──
     cfg.setdefault("categories", ["astro-ph.EP", "astro-ph.SR", "astro-ph.GA"])
@@ -102,6 +103,22 @@ def load_config() -> dict[str, Any]:
     # ── Backward compat: flat keyword list → weighted dict ──
     if isinstance(cfg["keywords"], list):
         cfg["keywords"] = {kw: 5 for kw in cfg["keywords"]}
+    if not isinstance(cfg["keyword_aliases"], dict):
+        cfg["keyword_aliases"] = {}
+    else:
+        normalised_aliases: dict[str, list[str]] = {}
+        for key, aliases in cfg["keyword_aliases"].items():
+            clean_key = str(key).strip()
+            if not clean_key:
+                continue
+            if isinstance(aliases, str):
+                alias_list = [aliases]
+            elif isinstance(aliases, list):
+                alias_list = [str(alias).strip() for alias in aliases if str(alias).strip()]
+            else:
+                continue
+            normalised_aliases[clean_key] = list(dict.fromkeys(alias_list))
+        cfg["keyword_aliases"] = normalised_aliases
 
     # ── Backward compat: flat colleagues list → people/institutions ──
     if isinstance(cfg["colleagues"], list):
@@ -158,6 +175,92 @@ def save_feedback_stats(stats: dict[str, Any]) -> None:
         json.dump(stats, f, indent=2)
 
 
+def _keyword_token_forms(token: str) -> set[str]:
+    """Return lightweight lexical variants for fuzzy keyword matching."""
+    clean = re.sub(r"[^a-z0-9]+", "", token.lower())
+    if not clean:
+        return set()
+    forms = {clean}
+    if len(clean) >= 6 and clean.endswith("ies"):
+        forms.add(clean[:-3] + "y")
+    if len(clean) >= 6 and clean.endswith("ves"):
+        forms.add(clean[:-3] + "f")
+    if len(clean) >= 6 and clean.endswith("es"):
+        forms.add(clean[:-2])
+    if len(clean) >= 5 and clean.endswith("s"):
+        forms.add(clean[:-1])
+    if len(clean) >= 7 and clean.endswith("ary"):
+        forms.add(clean[:-3])
+    return {form for form in forms if len(form) >= 3}
+
+
+def _tokenise_for_keyword_match(text: str) -> list[str]:
+    """Tokenise free text into comparable word stems."""
+    tokens: list[str] = []
+    for raw in re.findall(r"[a-z0-9][a-z0-9-]+", text.lower()):
+        tokens.extend(sorted(_keyword_token_forms(raw)))
+    return list(dict.fromkeys(tokens))
+
+
+def _tokens_match(keyword_token: str, paper_tokens: list[str]) -> bool:
+    """Match a keyword token against paper tokens with prefix-aware fuzziness."""
+    keyword_forms = _keyword_token_forms(keyword_token)
+    if not keyword_forms:
+        return False
+    for candidate in paper_tokens:
+        candidate_forms = _keyword_token_forms(candidate)
+        for left in keyword_forms:
+            for right in candidate_forms:
+                if left == right:
+                    return True
+                shorter, longer = (
+                    (left, right) if len(left) <= len(right) else (right, left)
+                )
+                if len(shorter) >= 5 and longer.startswith(shorter):
+                    return True
+    return False
+
+
+def _keyword_aliases_for(keyword: str, config: dict[str, Any]) -> list[str]:
+    """Return configured alias phrases for a keyword, matched case-insensitively."""
+    aliases = [keyword]
+    alias_map = config.get("keyword_aliases", {}) or {}
+    keyword_lower = keyword.strip().lower()
+    for raw_key, raw_aliases in alias_map.items():
+        if raw_key.strip().lower() != keyword_lower:
+            continue
+        aliases.extend(str(alias).strip() for alias in raw_aliases if str(alias).strip())
+    return list(dict.fromkeys(alias for alias in aliases if alias))
+
+
+def _keyword_variant_matches(variant: str, text_lower: str, paper_tokens: list[str]) -> bool:
+    """Match a keyword phrase using exact, token-set, and plural/hyphen tolerant logic."""
+    clean_variant = " ".join(part for part in re.split(r"[^a-z0-9]+", variant.lower()) if part)
+    if not clean_variant:
+        return False
+    if clean_variant in text_lower:
+        return True
+    variant_tokens = [token for token in clean_variant.split() if token]
+    if not variant_tokens:
+        return False
+    return all(_tokens_match(token, paper_tokens) for token in variant_tokens)
+
+
+def _matched_keywords_for_text(text: str, config: dict[str, Any]) -> list[str]:
+    """Return canonical keywords matched by the paper text, including aliases."""
+    text_lower = text.lower()
+    paper_tokens = _tokenise_for_keyword_match(text)
+    matched: list[str] = []
+    for keyword in config.get("keywords", {}):
+        variants = _keyword_aliases_for(keyword, config)
+        if any(
+            _keyword_variant_matches(variant, text_lower, paper_tokens)
+            for variant in variants
+        ):
+            matched.append(keyword)
+    return matched
+
+
 def update_keyword_stats(papers: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]:
     """Track which keywords matched papers in this run."""
     stats = load_keyword_stats()
@@ -169,11 +272,12 @@ def update_keyword_stats(papers: list[dict[str, Any]], config: dict[str, Any]) -
         stats[kw]["runs_checked"] += 1
 
     for paper in papers:
-        text_lower = (paper["title"] + " " + paper["abstract"]).lower()
-        for kw in config["keywords"]:
-            if kw.lower() in text_lower:
-                stats[kw]["total_hits"] += 1
-                stats[kw]["last_hit"] = today
+        matched_keywords = _matched_keywords_for_text(
+            paper["title"] + " " + paper["abstract"], config
+        )
+        for kw in matched_keywords:
+            stats[kw]["total_hits"] += 1
+            stats[kw]["last_hit"] = today
 
     save_keyword_stats(stats)
 
@@ -208,6 +312,44 @@ def _parse_feedback_issue(issue: dict[str, Any]) -> tuple[str | None, list[str]]
     return feedback_type, keywords
 
 
+def _next_github_link(link_header: str) -> str | None:
+    """Extract the next-page URL from a GitHub Link header."""
+    for part in link_header.split(","):
+        if 'rel="next"' not in part:
+            continue
+        match = re.search(r"<([^>]+)>", part)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _fetch_github_feedback_issues(
+    github_repo: str, token: str, per_page: int = 100, max_pages: int = 10
+) -> list[dict[str, Any]]:
+    """Fetch labeled feedback issues from GitHub with pagination."""
+    issues: list[dict[str, Any]] = []
+    next_url = (
+        f"https://api.github.com/repos/{github_repo}/issues"
+        f"?state=all&labels=digest-feedback&per_page={per_page}"
+    )
+    pages_fetched = 0
+
+    while next_url and pages_fetched < max_pages:
+        req = urllib.request.Request(next_url)
+        req.add_header("Accept", "application/vnd.github+json")
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("X-GitHub-Api-Version", "2022-11-28")
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+            if isinstance(payload, list):
+                issues.extend(payload)
+            next_url = _next_github_link(response.headers.get("Link", ""))
+        pages_fetched += 1
+
+    return issues
+
+
 def ingest_feedback_from_github(config: dict[str, Any]) -> dict[str, Any]:
     """Pull feedback issues from GitHub and update keyword preference stats.
 
@@ -229,15 +371,8 @@ def ingest_feedback_from_github(config: dict[str, Any]) -> dict[str, Any]:
         except (TypeError, ValueError):
             continue
 
-    url = f"https://api.github.com/repos/{github_repo}/issues?state=all&labels=digest-feedback&per_page=100"
-    req = urllib.request.Request(url)
-    req.add_header("Accept", "application/vnd.github+json")
-    req.add_header("Authorization", f"Bearer {token}")
-    req.add_header("X-GitHub-Api-Version", "2022-11-28")
-
     try:
-        with urllib.request.urlopen(req, timeout=30) as response:
-            issues = json.loads(response.read().decode("utf-8"))
+        issues = _fetch_github_feedback_issues(github_repo, token)
     except Exception as e:
         print(f"  ⚠️  Could not ingest feedback issues: {e}")
         return stats
@@ -385,10 +520,7 @@ def fetch_arxiv_papers(config: dict[str, Any]) -> list[dict[str, Any]]:
                     break
 
             # Weighted keyword scoring (raw sum)
-            matched_keywords = [
-                kw for kw in config["keywords"]
-                if kw.lower() in text_lower
-            ]
+            matched_keywords = _matched_keywords_for_text(title + " " + abstract, config)
             kw_hits_raw = sum(config["keywords"][kw] for kw in matched_keywords)
 
             papers.append({
@@ -1208,6 +1340,34 @@ def render_html(papers: list[dict[str, Any]], colleague_papers: list[dict[str, A
     )
 
 
+def _parse_recipient_emails(value: Any) -> list[str]:
+    """Return a de-duplicated recipient list from a string or sequence."""
+    if value is None:
+        return []
+
+    if isinstance(value, str):
+        raw_parts = re.split(r"[\n,;]+", value)
+    elif isinstance(value, (list, tuple, set)):
+        raw_parts = []
+        for item in value:
+            raw_parts.extend(re.split(r"[\n,;]+", str(item)))
+    else:
+        raw_parts = [str(value)]
+
+    recipients: list[str] = []
+    seen: set[str] = set()
+    for part in raw_parts:
+        email = part.strip()
+        if not email:
+            continue
+        key = email.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        recipients.append(email)
+    return recipients
+
+
 # ─────────────────────────────────────────────────────────────
 #  EMAIL SENDING — Multi-provider SMTP
 # ─────────────────────────────────────────────────────────────
@@ -1221,13 +1381,13 @@ def send_email(html: str, paper_count: int, date_str: str, config: dict[str, Any
         date_str: Human-readable date string for the subject line.
         config: Application config containing SMTP and recipient settings.
     """
-    recipient = config["recipient_email"]
+    recipients = _parse_recipient_emails(config.get("recipient_email"))
 
     # Support both new (SMTP_*) and legacy (GMAIL_*) secret names
     smtp_user = os.environ.get("SMTP_USER", "").strip() or os.environ.get("GMAIL_USER", "").strip()
     smtp_password = os.environ.get("SMTP_PASSWORD", "").strip() or os.environ.get("GMAIL_APP_PASSWORD", "").strip()
 
-    if not all([recipient, smtp_user, smtp_password]):
+    if not recipients or not smtp_user or not smtp_password:
         print("⚠️  SMTP credentials or RECIPIENT_EMAIL not set — skipping email send.")
         return
 
@@ -1235,14 +1395,14 @@ def send_email(html: str, paper_count: int, date_str: str, config: dict[str, Any
     smtp_port = config["smtp_port"]
 
     digest_name = config["digest_name"]
-    researcher_name = config["researcher_name"]
     paper_word = "paper" if paper_count == 1 else "papers"
     subject = f"🔭 {digest_name} — {paper_count} {paper_word} · {date_str}"
+    recipient_label = ", ".join(recipients)
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = f"{digest_name} <{smtp_user}>"
-    msg["To"] = recipient
+    msg["To"] = recipient_label
     msg.attach(MIMEText(f"Your arXiv digest for {date_str} — {paper_count} papers. Open in a browser for the full experience.", "plain"))
     msg.attach(MIMEText(html, "html"))
 
@@ -1252,8 +1412,13 @@ def send_email(html: str, paper_count: int, date_str: str, config: dict[str, Any
             server.starttls()
             server.ehlo()
             server.login(smtp_user, smtp_password)
-            server.sendmail(smtp_user, [recipient], msg.as_string())
-        print(f"✅ Email sent to {recipient} via {smtp_server}")
+            server.sendmail(smtp_user, recipients, msg.as_string())
+        if len(recipients) == 1:
+            print(f"✅ Email sent to {recipients[0]} via {smtp_server}")
+        else:
+            print(
+                f"✅ Email sent to {len(recipients)} recipients via {smtp_server}"
+            )
     except smtplib.SMTPAuthenticationError as e:
         print(f"❌ SMTP auth failed: {e}")
         if "gmail" in smtp_server.lower():

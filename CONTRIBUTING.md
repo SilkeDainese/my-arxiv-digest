@@ -21,7 +21,7 @@ cd arxiv-silke
 pip install -r requirements.txt
 
 # Run the digest locally
-export RECIPIENT_EMAIL="you@example.com"
+export RECIPIENT_EMAIL="you@example.com"  # or "alice@example.com,bob@example.com"
 export SMTP_USER="you@gmail.com"
 export SMTP_PASSWORD="your-app-password"
 export ANTHROPIC_API_KEY="your-key"   # optional

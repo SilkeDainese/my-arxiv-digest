@@ -39,7 +39,7 @@ Go to **Settings → Secrets and variables → Actions** and add:
 
 | Secret | Value |
 |--------|-------|
-| `RECIPIENT_EMAIL` | Your email address |
+| `RECIPIENT_EMAIL` | Your email address, or a comma-separated list for a group |
 | `SMTP_USER` | Your Gmail or Outlook address |
 | `SMTP_PASSWORD` | An [App Password](#email-setup) |
 
@@ -108,6 +108,7 @@ Set `ANTHROPIC_API_KEY` and/or `GEMINI_API_KEY` in your repo secrets. The digest
 Whether you use AI or keyword-only scoring, the algorithm works the same way underneath:
 
 1. **Keyword matching** — your keywords are checked against each paper's title and abstract, weighted by the importance you assigned them (1–10).
+   The matcher is fuzzy on purpose: plural/singular forms, hyphenation, and close lexical variants such as `planet` / `planetary` are treated as related. You can also add manual aliases in `keyword_aliases`.
 2. **Normalization** — scores are normalized across the day's papers so the ranking reflects relative relevance, not raw counts.
 3. **Self-citation boost** — papers that cite your work, or papers you have authored yourself, receive a relevance boost. You can toggle this on or off in your config.
 
@@ -125,6 +126,7 @@ Key fields:
 |-------|-------------|
 | `research_context` | Free-text description of your research (used by AI scoring) |
 | `keywords` | Dictionary of `keyword: weight` pairs (1-10) |
+| `keyword_aliases` | Optional `keyword: [similar phrases]` overrides for brittle terminology |
 | `recipient_view_mode` | `deep_read` (full cards) or `5_min_skim` (top 3 one-line summaries) |
 | `categories` | arXiv categories to monitor |
 | `research_authors` | Authors whose papers get a relevance boost |
@@ -164,7 +166,7 @@ These create labeled GitHub issues (`digest-feedback`) that are ingested automat
 ```bash
 pip install -r requirements.txt
 export ANTHROPIC_API_KEY="your-key"  # optional
-export RECIPIENT_EMAIL="you@example.com"
+export RECIPIENT_EMAIL="you@example.com"  # or "alice@example.com,bob@example.com"
 export SMTP_USER="you@gmail.com"
 export SMTP_PASSWORD="your-app-password"
 python digest.py

@@ -26,18 +26,23 @@ import yaml
 
 import digest as d
 from digest import (
+    _fetch_github_feedback_issues,
+    _parse_recipient_emails,
     _build_scoring_prompt,
     _default_analysis,
     _parse_feedback_issue,
+    _matched_keywords_for_text,
     _fallback_analyse,
     _filter_and_sort,
     apply_feedback_bias,
     extract_colleague_papers,
     extract_own_papers,
+    ingest_feedback_from_github,
     load_keyword_stats,
     pre_filter,
     render_html,
     save_keyword_stats,
+    send_email,
     update_keyword_stats,
 )
 
@@ -89,6 +94,7 @@ def make_config(**overrides):
         "digest_mode": "highlights",
         "recipient_view_mode": "deep_read",
         "self_match": [],
+        "keyword_aliases": {},
         "recipient_email": "test@example.com",
     }
     base.update(overrides)
@@ -162,6 +168,24 @@ class TestLoadConfig:
         with patch.object(d, "CONFIG_PATH", config_file):
             cfg = d.load_config()
         assert cfg["recipient_view_mode"] == "5_min_skim"
+
+    def test_keyword_aliases_normalized_to_lists(self, tmp_path):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            yaml.dump(
+                {
+                    "keywords": {"planet atmosphere": 8},
+                    "keyword_aliases": {
+                        "planet atmosphere": "planetary atmospheres",
+                    },
+                }
+            )
+        )
+        with patch.object(d, "CONFIG_PATH", config_file):
+            cfg = d.load_config()
+        assert cfg["keyword_aliases"] == {
+            "planet atmosphere": ["planetary atmospheres"]
+        }
 
     def test_highlights_mode_defaults(self, tmp_path):
         config_file = tmp_path / "config.yaml"
@@ -237,6 +261,27 @@ class TestKeywordNormalisation:
         raw = 14
         hits = round(100 * raw / max_possible, 1)
         assert hits == 100.0
+
+
+class TestKeywordMatching:
+    def test_matches_morphological_variants(self):
+        config = make_config(keywords={"planet atmosphere": 8})
+        matched = _matched_keywords_for_text(
+            "We analyse planetary atmospheres around warm Neptunes.",
+            config,
+        )
+        assert matched == ["planet atmosphere"]
+
+    def test_matches_configured_aliases(self):
+        config = make_config(
+            keywords={"JWST": 8},
+            keyword_aliases={"JWST": ["James Webb Space Telescope"]},
+        )
+        matched = _matched_keywords_for_text(
+            "We present James Webb Space Telescope observations of WASP-39 b.",
+            config,
+        )
+        assert matched == ["JWST"]
 
     def test_empty_keywords_no_division_by_zero(self):
         """Empty keywords dict must not divide by zero."""
@@ -854,6 +899,36 @@ class TestRenderHtml:
 
 
 # ─────────────────────────────────────────────────────────────
+#  Email sending
+# ─────────────────────────────────────────────────────────────
+
+
+class TestEmailSending:
+    def test_parse_recipient_emails_string_and_dedupes(self):
+        recipients = _parse_recipient_emails(
+            "a@example.com, b@example.com;\na@example.com"
+        )
+        assert recipients == ["a@example.com", "b@example.com"]
+
+    def test_send_email_supports_multiple_recipients(self):
+        config = make_config(recipient_email="a@example.com, b@example.com")
+        with patch.dict(
+            os.environ,
+            {"SMTP_USER": "sender@example.com", "SMTP_PASSWORD": "secret"},
+            clear=True,
+        ):
+            with patch("digest.smtplib.SMTP") as smtp_cls:
+                send_email("<p>hi</p>", 2, "March 01, 2025", config)
+
+        smtp_instance = smtp_cls.return_value.__enter__.return_value
+        smtp_instance.sendmail.assert_called_once()
+        send_args = smtp_instance.sendmail.call_args[0]
+        assert send_args[0] == "sender@example.com"
+        assert send_args[1] == ["a@example.com", "b@example.com"]
+        assert "To: a@example.com, b@example.com" in send_args[2]
+
+
+# ─────────────────────────────────────────────────────────────
 #  analyse_papers — cascade logic (no real API calls)
 # ─────────────────────────────────────────────────────────────
 
@@ -954,6 +1029,81 @@ class TestFeedbackHelpers:
         apply_feedback_bias(papers, stats)
         assert papers[0]["feedback_bias"] == 3
         assert papers[1]["feedback_bias"] == -1
+
+    def test_fetch_github_feedback_issues_follows_pagination(self):
+        class FakeResponse:
+            def __init__(self, payload, link=""):
+                self._payload = payload
+                self.headers = {"Link": link}
+
+            def read(self):
+                return json.dumps(self._payload).encode("utf-8")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        responses = iter(
+            [
+                FakeResponse(
+                    [{"id": 1}],
+                    '<https://api.github.com/repos/user/repo/issues?page=2>; rel="next"',
+                ),
+                FakeResponse([{"id": 2}]),
+            ]
+        )
+
+        with patch("digest.urllib.request.urlopen", side_effect=lambda *args, **kwargs: next(responses)):
+            issues = _fetch_github_feedback_issues("user/repo", "token")
+
+        assert [issue["id"] for issue in issues] == [1, 2]
+
+    def test_ingest_feedback_from_github_processes_multiple_pages(self, tmp_path):
+        class FakeResponse:
+            def __init__(self, payload, link=""):
+                self._payload = payload
+                self.headers = {"Link": link}
+
+            def read(self):
+                return json.dumps(self._payload).encode("utf-8")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        responses = iter(
+            [
+                FakeResponse(
+                    [
+                        {
+                            "id": 11,
+                            "body": "feedback_type: relevant\nmatched_keywords: JWST\n",
+                        }
+                    ],
+                    '<https://api.github.com/repos/user/repo/issues?page=2>; rel="next"',
+                ),
+                FakeResponse(
+                    [
+                        {
+                            "id": 12,
+                            "body": "feedback_type: not_relevant\nmatched_keywords: JWST\n",
+                        }
+                    ]
+                ),
+            ]
+        )
+
+        with patch.object(d, "FEEDBACK_STATS_PATH", tmp_path / "feedback_stats.json"):
+            with patch.dict(os.environ, {"GITHUB_TOKEN": "token"}, clear=True):
+                with patch("digest.urllib.request.urlopen", side_effect=lambda *args, **kwargs: next(responses)):
+                    stats = ingest_feedback_from_github(make_config(github_repo="user/repo"))
+
+        assert stats["processed_issue_ids"] == [11, 12]
+        assert stats["keyword_feedback"]["jwst"] == 0
 
 
 # ─────────────────────────────────────────────────────────────

@@ -35,6 +35,16 @@ keywords:
   atmospheric retrieval: 8
   cloud properties: 6
 
+# Optional: add synonym / alias phrases for brittle terminology.
+# The digest already does fuzzy matching for close variants (plural, hyphenation,
+# "planet" vs "planetary"), but you can pin manual aliases here too.
+# keyword_aliases:
+#   hot Jupiter atmosphere:
+#     - hot Jupiter atmospheres
+#     - giant planet atmosphere
+#   JWST:
+#     - James Webb Space Telescope
+
 # ── Your Author Name ──────────────────────────
 # How YOUR name appears in arXiv author lists.
 # If you publish a paper, it gets a special celebration section!
