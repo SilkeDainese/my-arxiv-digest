@@ -120,8 +120,8 @@ HTML = f"""<!DOCTYPE html>
     .title {{
       max-width: 680px;
       font-family: var(--font-heading);
-      font-size: 96px;
-      line-height: 0.92;
+      font-size: 82px;
+      line-height: 1.0;
       letter-spacing: -0.04em;
       margin-bottom: 24px;
     }}
