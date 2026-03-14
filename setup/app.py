@@ -17,7 +17,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from brand import PINE, GOLD, CARD_BORDER, WARM_GREY
-from pure_scraper import scrape_pure_profile, search_pure_profiles
+from pure_scraper import fetch_orcid_works, scrape_pure_profile, search_pure_profiles
 
 # ─────────────────────────────────────────────────────────────
 #  Page config
@@ -507,11 +507,15 @@ st.divider()
 
 
 # ─────────────────────────────────────────────────────────────
-#  Section 3: Pure Profile Scan (optional)
+#  Section 3: Profile Scan (optional)
 # ─────────────────────────────────────────────────────────────
 
-st.markdown("## 3. Pure Profile Scan (optional)")
-st.markdown("We can extract keywords and co-authors from your Pure research profile.")
+st.markdown("## 3. Profile Scan (optional)")
+st.markdown(
+    "We can extract keywords from your publication history. "
+    "Search by name to find your ORCID profile, then extract keywords in one click. "
+    "Or paste a Pure portal URL directly if you prefer."
+)
 
 if "pure_search_results" not in st.session_state:
     st.session_state.pure_search_results = []
@@ -519,52 +523,43 @@ if "pure_confirmed_url" not in st.session_state:
     st.session_state.pure_confirmed_url = ""
 
 if ai_assist:
-    # ── AI mode: search by name ──
-    st.markdown("**Just type your name** — we'll find your profile.")
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        pure_search_name = st.text_input(
-            "Your name",
-            value=researcher_name or "",
-            placeholder="Jane Smith",
-            key="pure_search_name",
-            label_visibility="collapsed",
-        )
-    with col2:
-        pure_base = st.text_input(
-            "Pure portal",
-            value="https://pure.au.dk",
-            help="Change if your institution uses a different Pure URL",
-            key="pure_base_url",
-            label_visibility="collapsed",
-        )
+    # ── AI mode: search by name via ORCID ──
+    st.markdown("**Search by name** to find your ORCID profile, then click **Use this** to extract keywords.")
+    pure_search_name = st.text_input(
+        "Your name",
+        value=researcher_name or "",
+        placeholder="Jane Smith",
+        key="pure_search_name",
+        label_visibility="collapsed",
+    )
 
-    if pure_search_name and st.button("🔍 Search Pure", type="primary"):
+    if pure_search_name and st.button("🔍 Search ORCID", type="primary"):
         with st.spinner(f"Searching for '{pure_search_name}'..."):
-            st.session_state.pure_search_results = search_pure_profiles(pure_search_name, pure_base)
+            st.session_state.pure_search_results = search_pure_profiles(pure_search_name)
             st.session_state.pure_confirmed_url = ""
 
         if not st.session_state.pure_search_results:
-            st.warning("No profiles found. Try a different spelling, or paste your Pure URL directly below.")
+            st.warning(
+                "No ORCID profiles found. "
+                "Try searching with just your last name, or a shorter version of your name."
+            )
 
-    # Show search results as selectable options
+    # Show search results — clicking "Use this" stores the ORCID URL and enables extraction
     if st.session_state.pure_search_results:
-        st.markdown("**Is this you?** Click to confirm:")
-        for i, result in enumerate(st.session_state.pure_search_results):
+        st.markdown("**Found on ORCID:**")
+        for result in st.session_state.pure_search_results:
             dept_label = f" — {result['department']}" if result['department'] else ""
-            if st.button(
-                f"✅ {result['name']}{dept_label}",
-                key=f"confirm_pure_{i}",
-                help=result['url'],
-                use_container_width=True,
-            ):
-                st.session_state.pure_confirmed_url = result["url"]
-                st.rerun()
+            col_name, col_btn = st.columns([5, 1])
+            with col_name:
+                st.markdown(f"{result['name']}{dept_label} ([ORCID]({result['url']}))")
+            with col_btn:
+                if st.button("Use this", key=f"select_orcid_{result['url']}"):
+                    st.session_state.pure_confirmed_url = result["url"]
+                    st.session_state.pure_scanned = False
+                    st.rerun()
 
-        st.caption("Not in the list? Paste your Pure URL directly below.")
-
-    # Fallback: manual URL entry
-    with st.expander("Or paste your Pure URL directly"):
+    # Manual Pure URL entry for keyword/co-author extraction
+    with st.expander("Paste your Pure profile URL to extract keywords & co-authors"):
         pure_url_manual = st.text_input(
             "Pure profile URL",
             placeholder="https://pure.au.dk/portal/en/persons/your-name",
@@ -584,16 +579,49 @@ else:
     if pure_url_direct:
         st.session_state.pure_confirmed_url = pure_url_direct
 
-# ── Scan the confirmed profile ──
-if st.session_state.pure_confirmed_url and not st.session_state.pure_scanned:
-    st.info(f"Profile: `{st.session_state.pure_confirmed_url}`")
-    if st.button("📥 Extract keywords & co-authors", type="primary"):
-        with st.spinner("Scanning profile..."):
-            keywords, coauthors, error = scrape_pure_profile(st.session_state.pure_confirmed_url)
+# ── Scan the confirmed Pure profile ──
+# Guard: ORCID URLs are not Pure pages and cannot be scraped for publications.
+_confirmed = st.session_state.pure_confirmed_url
+_is_orcid_url = _confirmed.startswith("https://orcid.org/")
+
+if _confirmed and _is_orcid_url and not st.session_state.pure_scanned:
+    orcid_id = _confirmed.rstrip("/").split("/")[-1]
+    st.info(f"ORCID profile selected: `{orcid_id}`")
+    if st.button("📥 Extract keywords from ORCID", type="primary"):
+        with st.spinner("Fetching publications from ORCID..."):
+            keywords, _, error = fetch_orcid_works(orcid_id)
 
         if error:
-            st.error(f"Could not scan profile: {error}")
+            st.error(f"Could not fetch publications: {error}")
             st.info("No worries — you can add keywords manually below.")
+        else:
+            st.session_state.pure_scanned = True
+            if keywords:
+                merged = dict(st.session_state.keywords)
+                merged.update(keywords)
+                st.session_state.keywords = merged
+                st.success(f"Found {len(keywords)} keywords from your ORCID publications!")
+            st.rerun()
+
+elif _confirmed and _is_orcid_url and st.session_state.pure_scanned:
+    st.success(f"ORCID profile scanned: {_confirmed}")
+
+elif _confirmed and not st.session_state.pure_scanned:
+    st.info(f"Profile: `{_confirmed}`")
+    if st.button("📥 Extract keywords & co-authors", type="primary"):
+        with st.spinner("Scanning profile..."):
+            keywords, coauthors, error = scrape_pure_profile(_confirmed)
+
+        if error:
+            if "403" in str(error) or "Forbidden" in str(error):
+                st.error("Pure portal is Cloudflare-protected — automated access is blocked.")
+                st.info(
+                    "Try the **name search above** instead: it uses the ORCID API which works "
+                    "reliably. Search for just your last name if your full name isn't found."
+                )
+            else:
+                st.error(f"Could not scan profile: {error}")
+                st.info("No worries — you can add keywords manually below.")
         else:
             st.session_state.pure_scanned = True
             if keywords:
@@ -615,7 +643,7 @@ if st.session_state.pure_confirmed_url and not st.session_state.pure_scanned:
             st.rerun()
 
 elif st.session_state.pure_scanned:
-    st.success(f"✅ Profile scanned: {st.session_state.pure_confirmed_url}")
+    st.success(f"Profile scanned: {st.session_state.pure_confirmed_url}")
 
 st.divider()
 
