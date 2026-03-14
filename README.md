@@ -8,7 +8,7 @@ I built this for myself. I am a PhD student in astronomy at Aarhus University �
 
 If you have suggestions, open an issue or [email me](mailto:dainese@phys.au.dk). I cannot promise to implement them — my research comes first.
 
-> **For students:** The setup wizard has a guided track for **astronomy students** with pre-built keyword sets, AU faculty tracking, and telescope presets. If you are from another field and would like something similar for your speciality, [write me](mailto:dainese@phys.au.dk) and I will set it up.
+> **For students:** The setup wizard includes a simple student-friendly astronomy path with pre-built interest packages and lighter weekly defaults. If you are from another field and would like something similar for your speciality, [write me](mailto:dainese@phys.au.dk) and I will set it up.
 
 *Built with the help of Claude Opus and Sonnet 4.6.*
 
@@ -30,7 +30,7 @@ Prefer a terminal flow? Run `python -m scripts.friend_setup` from a checkout of 
 
 Fill in your name, research description, keywords, and the email address where you want your digest. The wizard generates a `config.yaml` file — download it.
 
-> **Students:** Choose the "AU Astronomy Student" track for a pre-filled config with your department's faculty, telescopes, and keywords. You can customise it later.
+> **Students:** Choose the student mini-setup if you want a simpler weekly config built from broad astronomy interest packages. You can customise it later.
 
 ### 2. Fork this repo
 
