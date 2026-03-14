@@ -211,6 +211,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"   {len(ranked_papers)} papers available for student selection ({scoring_method})")
 
     processed_count = 0
+    skipped_count = 0
+    failed_recipients: list[str] = []
     for subscription in active_subscriptions:
         selected = select_student_papers(
             ranked_papers,
@@ -219,6 +221,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         if not selected:
             print(f"   ↷ No matching papers for {subscription['email']} — skipping")
+            skipped_count += 1
             continue
 
         student_config = make_student_digest_config(base_config, subscription)
@@ -241,13 +244,19 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"\n📧 Sending student digest to {summary}")
             if not send_email(html, len(selected), date_str, student_config, papers=selected):
-                return 1
+                failed_recipients.append(subscription["email"])
+                continue
         processed_count += 1
 
     if preview_dir is not None:
-        print(f"\n✨ Wrote {processed_count} student preview(s).\n")
-    else:
-        print(f"\n✨ Sent {processed_count} student digest(s).\n")
+        print(f"\n✨ Wrote {processed_count} student preview(s), skipped {skipped_count}.\n")
+        return 0
+
+    print(f"\n✨ Sent {processed_count} student digest(s), skipped {skipped_count}.")
+    if failed_recipients:
+        print("❌ Failed recipients: " + ", ".join(failed_recipients))
+        return 1
+    print()
     return 0
 
 

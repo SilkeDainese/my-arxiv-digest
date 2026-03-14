@@ -260,3 +260,51 @@ def test_fetch_student_subscriptions_skips_invalid_records(monkeypatch):
             "active": True,
         }
     ]
+
+
+def test_student_digest_continues_after_send_failure(monkeypatch):
+    subscriptions = [
+        {
+            "email": "first@example.com",
+            "package_ids": ["exoplanets"],
+            "max_papers_per_week": 2,
+            "active": True,
+        },
+        {
+            "email": "second@example.com",
+            "package_ids": ["exoplanets"],
+            "max_papers_per_week": 2,
+            "active": True,
+        },
+    ]
+    papers = [
+        make_paper(
+            id="student-paper",
+            matched_keywords=["exoplanet"],
+            relevance_score=8,
+        )
+    ]
+    attempts = []
+
+    monkeypatch.setattr(sd, "fetch_student_subscriptions", lambda: subscriptions)
+    monkeypatch.setattr(sd, "fetch_arxiv_papers", lambda config: papers)
+    monkeypatch.setattr(sd, "ingest_feedback_from_github", lambda config: {})
+    monkeypatch.setattr(sd, "apply_feedback_bias", lambda papers, feedback_stats: None)
+    monkeypatch.setattr(sd, "pre_filter", lambda papers: papers)
+    monkeypatch.setattr(sd, "analyse_papers", lambda papers, config: (papers, "keywords"))
+    monkeypatch.setattr(
+        sd,
+        "render_html",
+        lambda papers, colleague_papers, config, date_str, own_papers, scoring_method: config["recipient_email"],
+    )
+
+    def fake_send_email(html, paper_count, date_str, config, papers=None):
+        attempts.append(config["recipient_email"])
+        return config["recipient_email"] != "first@example.com"
+
+    monkeypatch.setattr(sd, "send_email", fake_send_email)
+
+    exit_code = sd.main([])
+
+    assert exit_code == 1
+    assert attempts == ["first@example.com", "second@example.com"]
