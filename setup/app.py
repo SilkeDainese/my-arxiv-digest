@@ -291,15 +291,55 @@ CATEGORY_HINTS = {
     ],
     "hep-th": [
         "string theory", "quantum field theory", "supersymmetry", "AdS/CFT",
-        "holograph", "conformal field", "gauge theory", "brane",
+        "holograph", "conformal field", "gauge theory", "brane", "S-matrix",
+        "amplitude", "duality", "topological field theory",
     ],
     "hep-ph": [
         "particle physics", "Standard Model", "Higgs", "collider", "LHC",
         "neutrino", "dark matter candidate", "beyond Standard Model",
+        "parton", "QCD", "electroweak", "flavor physics", "CP violation",
+    ],
+    "hep-ex": [
+        "collider experiment", "ATLAS", "CMS", "LHCb", "Belle", "BaBar",
+        "particle detector", "particle beam", "cross section measurement",
+        "high energy experiment", "calorimeter",
+    ],
+    "hep-lat": [
+        "lattice QCD", "lattice gauge", "Monte Carlo lattice", "Wilson fermion",
+        "lattice field theory", "non-perturbative QCD",
     ],
     "gr-qc": [
         "general relativity", "gravitational wave", "black hole", "spacetime",
         "metric", "Einstein", "curvature", "singularity", "LIGO",
+        "post-Newtonian", "numerical relativity", "wormhole", "geodesic",
+    ],
+    "math-ph": [
+        "mathematical physics", "rigorous", "spectral theory", "operator algebra",
+        "integrable system", "Hamiltonian", "symplectic", "functional analysis",
+    ],
+    "nucl-th": [
+        "nuclear theory", "nuclear structure", "shell model", "nuclear force",
+        "nucleon", "hadronic", "quark-gluon plasma", "nuclear matter", "fission",
+    ],
+    "nucl-ex": [
+        "nuclear experiment", "nuclear reaction", "radioactive beam", "heavy-ion",
+        "nuclear decay", "nuclear spectroscopy", "CERN", "RHIC", "nuclear cross section",
+    ],
+    "nlin.CD": [
+        "chaos", "chaotic dynamics", "Lyapunov", "strange attractor", "bifurcation",
+        "nonlinear dynamics", "sensitive dependence",
+    ],
+    "nlin.PS": [
+        "soliton", "pattern formation", "nonlinear wave", "reaction-diffusion",
+        "Turing pattern", "amplitude equation", "modulational instability",
+    ],
+    "nlin.SI": [
+        "integrable", "inverse scattering", "Lax pair", "Painlevé", "exact solution",
+        "conservation law", "Bäcklund",
+    ],
+    "nlin.AO": [
+        "self-organization", "adaptation", "complex system", "emergence",
+        "network dynamics", "synchronization",
     ],
     "cond-mat.supr-con": [
         "superconductor", "superconductivity", "BCS", "Cooper pair", "vortex",
@@ -340,17 +380,65 @@ CATEGORY_HINTS = {
         "quantum computing", "qubit", "entanglement", "quantum information",
         "quantum optics", "decoherence", "quantum error", "quantum algorithm",
     ],
+    "physics.atom-ph": [
+        "atomic physics", "cold atoms", "laser cooling", "Bose-Einstein", "ion trap",
+        "optical clock", "precision measurement", "atomic spectrum", "photoionization",
+    ],
+    "physics.atm-clus": [
+        "atomic cluster", "nanoparticle", "fullerene", "cluster physics",
+        "molecular cluster", "van der Waals cluster",
+    ],
+    "physics.chem-ph": [
+        "chemical physics", "molecular physics", "reaction dynamics", "potential energy surface",
+        "spectroscopy", "photochemistry", "adiabatic", "Born-Oppenheimer",
+    ],
+    "physics.comp-ph": [
+        "computational physics", "simulation", "numerical method", "finite element",
+        "molecular dynamics simulation", "Monte Carlo simulation", "FDTD", "algorithm",
+    ],
+    "physics.plasm-ph": [
+        "plasma", "fusion", "tokamak", "plasma wave", "magnetohydrodynamic", "MHD",
+        "inertial confinement", "plasma instability", "ITER", "laser plasma",
+    ],
+    "physics.space-ph": [
+        "space physics", "solar wind", "magnetosphere", "ionosphere", "cosmic ray",
+        "heliosphere", "aurora", "geomagnetic storm", "Van Allen",
+    ],
+    "physics.ao-ph": [
+        "atmospheric", "climate", "ocean", "meteorology", "geophysical fluid",
+        "El Niño", "general circulation", "aerosol", "cloud physics",
+    ],
+    "physics.geo-ph": [
+        "geophysics", "seismic", "earthquake", "mantle", "plate tectonics",
+        "seismology", "geodesy", "geodynamics", "geomagnetism",
+    ],
+    "physics.ins-det": [
+        "detector", "instrumentation", "sensor", "readout", "signal processing",
+        "particle detector", "scintillator", "photodetector", "FPGA",
+    ],
+    "physics.med-ph": [
+        "medical physics", "radiation therapy", "MRI", "CT scan", "dosimetry",
+        "radiobiology", "proton therapy", "nuclear medicine", "imaging",
+    ],
     "physics.optics": [
         "optical", "laser", "photon", "waveguide", "fiber", "lens",
-        "diffraction", "nonlinear optics", "ultrafast",
+        "diffraction", "nonlinear optics", "ultrafast", "plasmon",
     ],
     "physics.bio-ph": [
         "biophysics", "protein", "membrane", "DNA", "RNA", "cell",
-        "molecular dynamics", "biological", "enzyme",
+        "molecular dynamics", "biological", "enzyme", "single-molecule",
     ],
     "physics.flu-dyn": [
         "fluid", "turbulence", "Navier-Stokes", "flow", "viscous",
-        "Reynolds", "boundary layer", "vortex",
+        "Reynolds", "boundary layer", "vortex", "aerodynamics",
+    ],
+    "physics.acc-ph": [
+        "accelerator", "synchrotron", "free electron laser", "beam physics",
+        "particle accelerator", "storage ring", "undulator", "linac",
+    ],
+    "physics.data-an": [
+        "data analysis", "statistical method", "uncertainty quantification",
+        "systematic error", "likelihood", "goodness of fit",
     ],
     "cs.AI": [
         "artificial intelligence", "reasoning", "planning", "knowledge",
@@ -368,9 +456,116 @@ CATEGORY_HINTS = {
         "natural language", "NLP", "language model", "text", "translation",
         "sentiment", "parsing", "BERT", "tokeniz",
     ],
+    "cs.DS": [
+        "algorithm", "data structure", "complexity", "graph algorithm",
+        "sorting", "combinatorial", "approximation algorithm",
+    ],
+    "cs.RO": [
+        "robot", "robotics", "motion planning", "control", "autonomous",
+        "SLAM", "manipulation", "drone",
+    ],
+    "cs.NE": [
+        "evolutionary", "genetic algorithm", "swarm", "neuroevolution",
+        "neural architecture search", "bio-inspired",
+    ],
+    "math.AP": [
+        "partial differential equation", "PDE", "elliptic", "parabolic",
+        "hyperbolic", "weak solution", "regularity", "Sobolev",
+    ],
+    "math.PR": [
+        "probability", "stochastic process", "Brownian motion", "Markov chain",
+        "random walk", "martingale", "diffusion process",
+    ],
+    "math.ST": [
+        "statistics", "hypothesis testing", "estimator", "asymptotic",
+        "consistency", "maximum likelihood", "nonparametric",
+    ],
+    "math.DS": [
+        "dynamical system", "ergodic", "attractor", "invariant measure",
+        "topological dynamics", "symbolic dynamics",
+    ],
+    "math.NT": [
+        "number theory", "prime", "Riemann", "arithmetic", "Diophantine",
+        "algebraic number", "modular form", "L-function",
+    ],
+    "math.AG": [
+        "algebraic geometry", "variety", "scheme", "sheaf", "cohomology",
+        "moduli", "Hodge theory", "Calabi-Yau",
+    ],
+    "math.DG": [
+        "differential geometry", "manifold", "Riemannian", "curvature tensor",
+        "connection", "fiber bundle", "symplectic manifold",
+    ],
+    "math-ph": [
+        "mathematical physics", "rigorous", "spectral theory", "operator algebra",
+        "integrable system", "Hamiltonian", "symplectic",
+    ],
     "stat.ML": [
         "statistical learning", "Bayesian", "inference", "regression",
         "classification", "kernel", "non-parametric", "MCMC",
+    ],
+    "stat.ME": [
+        "statistical methodology", "survey sampling", "experimental design",
+        "causal inference", "missing data", "mixed model",
+    ],
+    "stat.AP": [
+        "applied statistics", "biostatistics", "clinical trial", "survival analysis",
+        "epidemiology", "econometrics",
+    ],
+    "eess.SP": [
+        "signal processing", "Fourier", "filter", "time series", "spectral estimation",
+        "compressed sensing", "wavelet",
+    ],
+    "eess.SY": [
+        "control system", "feedback", "stability", "optimal control",
+        "robust control", "system identification", "Lyapunov",
+    ],
+    "eess.IV": [
+        "image processing", "video", "compression", "super-resolution",
+        "image reconstruction", "denoising",
+    ],
+    "eess.AS": [
+        "audio", "speech recognition", "speaker", "acoustic", "sound",
+        "music information retrieval", "spoken language",
+    ],
+    "q-bio.BM": [
+        "biomolecule", "protein structure", "protein folding", "molecular biology",
+        "enzyme kinetics", "RNA structure", "AlphaFold",
+    ],
+    "q-bio.NC": [
+        "neuroscience", "neural circuit", "brain", "synapse", "spike",
+        "neural coding", "cortex", "connectome",
+    ],
+    "q-bio.PE": [
+        "evolution", "population genetics", "phylogeny", "fitness",
+        "selection", "mutation rate", "ecological dynamics",
+    ],
+    "q-bio.GN": [
+        "genomics", "genome", "gene expression", "RNA-seq", "CRISPR",
+        "sequencing", "transcriptome", "epigenome",
+    ],
+    "q-bio.QM": [
+        "quantitative biology", "mathematical biology", "systems biology",
+        "computational biology", "bioinformatics",
+    ],
+    "q-bio.CB": [
+        "cell motility", "cell signaling", "cytoskeleton", "cell division",
+        "chemotaxis", "collective cell migration", "cellular mechanics",
+    ],
+    "stat.CO": [
+        "computational statistics", "MCMC algorithm", "variational inference",
+        "approximate Bayesian", "ABC", "expectation maximization",
+    ],
+    "stat.TH": [
+        "statistical theory", "minimax", "risk bound", "concentration inequality",
+        "semiparametric", "empirical process", "decision theory",
+    ],
+    "nlin.CG": [
+        "cellular automaton", "lattice gas", "rule", "automata", "discrete simulation",
+    ],
+    "physics.soc-ph": [
+        "social physics", "opinion dynamics", "social network", "agent-based social",
+        "econophysics", "complex network",
     ],
 }
 
