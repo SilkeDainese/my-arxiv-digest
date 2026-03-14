@@ -609,7 +609,7 @@ def suggest_categories(text: str) -> list[str]:
         if cat not in ARXIV_CATEGORIES:
             continue
         score = sum(1 for h in hints if h.lower() in text_lower)
-        if score > 0:
+        if score >= 2:
             scores[cat] = score
     return sorted(scores, key=scores.get, reverse=True)[:6]
 
