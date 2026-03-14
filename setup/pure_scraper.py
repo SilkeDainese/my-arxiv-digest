@@ -364,7 +364,7 @@ def scrape_pure_profile(url: str) -> tuple[dict | None, list | None, str | None]
 #  Publication Fetch (ORCID works API)
 # ─────────────────────────────────────────────────────────────
 
-def fetch_orcid_works(orcid_id: str) -> tuple[dict | None, list[str] | None, list[str] | None, str | None]:
+def fetch_orcid_works(orcid_id: str) -> tuple[dict | None, list[str] | None, list[dict] | None, dict | None, str | None]:
     """
     Fetch publications from the ORCID public API, derive keywords, and collect co-authors.
 
@@ -376,13 +376,19 @@ def fetch_orcid_works(orcid_id: str) -> tuple[dict | None, list[str] | None, lis
         orcid_id: bare ORCID identifier (e.g. "0000-0001-7568-6674")
 
     Returns:
-        (keywords_dict, titles, coauthor_orcids_dict, error)
+        (keywords_dict, titles, works_meta, coauthor_orcids_dict, error)
         - keywords_dict maps keyword to weight (1-10)
         - titles is the list of raw publication titles (for AI summary)
+        - works_meta is a list of {"title": str, "year": int | None} dicts, one per
+          publication, in ORCID order (most-recent first for most profiles)
         - coauthor_orcids_dict maps ORCID ID -> display name for co-authors who have ORCIDs;
           a plain name list for those without ORCIDs is folded into the dict with "" keys
         - error is None on success or an error string on failure
-        Returns (None, None, None, error_str) on failure.
+        Returns (None, None, None, None, error_str) on failure.
+
+    Note on author-position data: the ORCID /works summary endpoint does not reliably
+    return contributor sequences. works_meta therefore omits author position — callers
+    should fall back to year-descending order for smart pre-selection.
     """
     try:
         resp = requests.get(
@@ -392,9 +398,10 @@ def fetch_orcid_works(orcid_id: str) -> tuple[dict | None, list[str] | None, lis
         )
         resp.raise_for_status()
     except Exception as e:
-        return None, None, None, str(e)
+        return None, None, None, None, str(e)
 
     titles: list[str] = []
+    works_meta: list[dict] = []
     # orcid_id -> name for co-authors with ORCIDs; name -> "" for those without
     coauthor_map: dict[str, str] = {}
     name_appearances: Counter[str] = Counter()
@@ -405,6 +412,15 @@ def fetch_orcid_works(orcid_id: str) -> tuple[dict | None, list[str] | None, lis
             title_value = title_obj.get("value", "").strip()
             if title_value:
                 titles.append(title_value)
+                # Extract publication year — present in most ORCID summary records
+                pub_date = summary.get("publication-date") or {}
+                year_obj = pub_date.get("year") or {}
+                year_str = year_obj.get("value", "") if isinstance(year_obj, dict) else ""
+                try:
+                    year: int | None = int(year_str) if year_str else None
+                except (ValueError, TypeError):
+                    year = None
+                works_meta.append({"title": title_value, "year": year})
 
             # Collect contributors from this work summary
             contributors = (summary.get("contributors") or {}).get("contributor", [])
@@ -423,7 +439,7 @@ def fetch_orcid_works(orcid_id: str) -> tuple[dict | None, list[str] | None, lis
             break  # First summary per group is sufficient for titles
 
     if not titles:
-        return None, None, None, "No publications found on this ORCID profile."
+        return None, None, None, None, "No publications found on this ORCID profile."
 
     # Add name-only co-authors who appeared in 2+ papers (reduces noise)
     for name, count in name_appearances.items():
@@ -458,7 +474,7 @@ def fetch_orcid_works(orcid_id: str) -> tuple[dict | None, list[str] | None, lis
         for term, count in combined.most_common(20):
             keywords[term] = max(1, round(10 * count / max_count))
 
-    return keywords, titles, coauthor_map, None
+    return keywords, titles, works_meta, coauthor_map, None
 
 
 def find_au_colleagues(

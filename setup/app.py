@@ -894,9 +894,10 @@ def _import_profile(result: dict) -> None:
 
     # Extract keywords from publications
     orcid_id = result["url"].rstrip("/").split("/")[-1]
-    keywords, _titles, _coauthor_map, error = fetch_orcid_works(orcid_id)
-    # Persist titles and coauthor map for paper selector and suggested colleagues
+    keywords, _titles, _works_meta, _coauthor_map, error = fetch_orcid_works(orcid_id)
+    # Persist titles, works meta, and coauthor map for paper selector and suggested colleagues
     st.session_state["_orcid_titles"] = _titles or []
+    st.session_state["_orcid_works_meta"] = _works_meta or []
     st.session_state["_orcid_coauthor_map"] = dict(_coauthor_map) if _coauthor_map else {}
     if not error and keywords:
         _apply_orcid_keywords(keywords, orcid_url=result["url"])
@@ -1152,10 +1153,11 @@ def _commit_preview() -> None:
             if arxiv_pattern not in st.session_state.self_match:
                 st.session_state.self_match.append(arxiv_pattern)
 
-    # Persist paper titles and coauthor map for use in Section 3 (paper selector)
-    # and Section 7 (suggested colleagues). Store even if empty so downstream
+    # Persist paper titles, works meta, and coauthor map for use in Section 3 (paper
+    # selector) and Section 7 (suggested colleagues). Store even if empty so downstream
     # code can check without KeyError.
     st.session_state["_orcid_titles"] = p.get("titles", [])
+    st.session_state["_orcid_works_meta"] = p.get("works_meta", [])
     st.session_state["_orcid_coauthor_map"] = p.get("coauthor_map", {})
 
     st.session_state.pure_scanned = True
@@ -1204,7 +1206,7 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
             if orcid_id:
                 with st.spinner("Fetching profile and publications from ORCID..."):
                     full_name, institution, person_error = fetch_orcid_person(orcid_id)
-                    keywords, titles, coauthor_map, works_error = fetch_orcid_works(orcid_id)
+                    keywords, titles, works_meta, coauthor_map, works_error = fetch_orcid_works(orcid_id)
 
                 if person_error:
                     st.error(f"Could not fetch profile: {person_error}")
@@ -1230,6 +1232,8 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
                         "orcid_url": orcid_url,
                         "keywords": keywords or {},
                         "titles": titles or [],
+                        # Per-paper metadata (title + year) for smart pre-selection
+                        "works_meta": works_meta or [],
                         "au_colleagues": au_colleagues,
                         "all_coauthors": sorted(coauthor_map.values()) if coauthor_map else [],
                         # Raw coauthor map retained for frequency counting in suggested-colleagues
@@ -1442,23 +1446,72 @@ with st.expander("**3. Your Research Description**", expanded=(st.session_state.
     # ── Paper selector: choose which publications inform AI keyword/category suggestions ──
     _orcid_titles = st.session_state.get("_orcid_titles", [])
     if _orcid_titles:
+        _total_papers = len(_orcid_titles)
+        _smart_threshold = 10  # use smart pre-selection when user has this many or more papers
+
+        def _smart_paper_default(titles: list[str], works_meta: list[dict], cap: int = 10) -> list[str]:
+            """
+            Return a smart default selection of up to `cap` papers.
+
+            Priority: most-recent first (year descending, None years last).
+            Author-position data is not available from the ORCID summary endpoint —
+            the fallback is year-descending order, which surfaces recent work reliably.
+            """
+            # Build a year lookup from works_meta; fall back to None when absent
+            year_map: dict[str, int | None] = {}
+            for entry in works_meta:
+                t = entry.get("title", "")
+                if t:
+                    # Keep the most recent year if a title appears more than once
+                    existing = year_map.get(t)
+                    y = entry.get("year")
+                    if existing is None or (y is not None and y > existing):
+                        year_map[t] = y
+
+            # Sort: known years descending first, unknowns at the end (preserve ORCID order)
+            def _sort_key(title: str) -> tuple[int, int]:
+                yr = year_map.get(title)
+                return (0, -(yr or 0)) if yr is not None else (1, 0)
+
+            candidates = sorted(titles, key=_sort_key)
+            return candidates[:cap]
+
+        # Only compute smart default once — when selected_papers is still empty (first render)
+        # or when all current selections are stale (title list changed after a profile reset).
+        _existing = [t for t in st.session_state.selected_papers if t in _orcid_titles]
+
+        if not _existing:
+            # First render or stale state: compute the default
+            if _total_papers >= _smart_threshold:
+                _works_meta = st.session_state.get("_orcid_works_meta", [])
+                _default_selection = _smart_paper_default(_orcid_titles, _works_meta, cap=_smart_threshold)
+                _selection_note = (
+                    f"{_total_papers} papers found — showing smart selection of "
+                    f"{len(_default_selection)} most recent"
+                )
+            else:
+                _default_selection = list(_orcid_titles)
+                _selection_note = ""
+        else:
+            _default_selection = _existing
+            _selection_note = ""
+
         st.markdown("**Which papers should we use to suggest your keywords?** (select the most representative ones)")
-        st.caption("All fetched from your ORCID profile. Deselect papers from unrelated projects.")
-        _all_selected = st.session_state.selected_papers or list(_orcid_titles)
-        # Trim any stale selections that no longer exist in current titles list
-        _all_selected = [t for t in _all_selected if t in _orcid_titles]
-        if not _all_selected:
-            _all_selected = list(_orcid_titles)
+        if _total_papers >= _smart_threshold and _selection_note:
+            st.caption(_selection_note)
+        else:
+            st.caption("All fetched from your ORCID profile. Deselect papers from unrelated projects.")
+
         _new_selection = st.multiselect(
             "Papers for keyword suggestions",
             options=_orcid_titles,
-            default=_all_selected,
+            default=_default_selection,
             label_visibility="collapsed",
             key="paper_selector_widget",
         )
         st.session_state.selected_papers = _new_selection
-        if len(_new_selection) < len(_orcid_titles):
-            st.caption(f"{len(_new_selection)} of {len(_orcid_titles)} papers selected.")
+        if len(_new_selection) < _total_papers:
+            st.caption(f"{len(_new_selection)} of {_total_papers} papers selected.")
 
     # ── AI suggestions: auto-run if description was auto-drafted, else show button ──
     if ai_assist and research_context_widget and len(research_context_widget) > 30:
