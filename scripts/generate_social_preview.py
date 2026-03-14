@@ -366,7 +366,7 @@ async def render_social_preview() -> None:
 
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch()
-        page = await browser.new_page(viewport={"width": 1280, "height": 640}, device_scale_factor=1)
+        page = await browser.new_page(viewport={"width": 1280, "height": 640}, device_scale_factor=2)
         await page.set_content(HTML, wait_until="networkidle")
         await page.locator(".canvas").screenshot(path=str(OUTPUT_PATH))
         await browser.close()
