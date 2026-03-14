@@ -1509,7 +1509,7 @@ def _parse_recipient_emails(value: Any) -> list[str]:
 
 RELAY_URL = os.environ.get(
     "DIGEST_RELAY_URL",
-    "https://project-0jp0o.vercel.app/api/send",
+    "https://arxiv-digest-relay.vercel.app/api/send",
 )
 RELAY_TOKEN = os.environ.get("DIGEST_RELAY_TOKEN", "arxiv-digest-v1-relay")
 
