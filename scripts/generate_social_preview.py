@@ -304,10 +304,10 @@ HTML = f"""<!DOCTYPE html>
       margin-top: auto;
       padding-top: 16px;
       border-top: 1px solid rgba(47, 79, 62, 0.14);
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 10px 16px;
-      align-items: end;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: flex-start;
       font-family: var(--font-mono);
       font-size: 12px;
       letter-spacing: 0.06em;
@@ -321,7 +321,6 @@ HTML = f"""<!DOCTYPE html>
     }}
 
     .footer-right {{
-      text-align: right;
       color: var(--pine);
     }}
   </style>
@@ -381,7 +380,7 @@ HTML = f"""<!DOCTYPE html>
         </div>
         <div class="footer">
           <div>Created by <strong>Silke S. Dainese</strong></div>
-          <div class="footer-right">SilkeDainese/arxiv-digest</div>
+          <div class="footer-right">Repo: SilkeDainese/arxiv-digest</div>
         </div>
       </aside>
     </section>
