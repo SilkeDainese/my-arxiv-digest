@@ -69,8 +69,8 @@ class handler(BaseHTTPRequestHandler):
         msg["Subject"] = subject
         msg["From"] = f"arXiv Digest <{SMTP_USER}>"
         msg["To"] = ", ".join(recipients)
-        msg.attach(MIMEText(plain_text, "plain"))
-        msg.attach(MIMEText(html, "html"))
+        msg.attach(MIMEText(plain_text, "plain", "utf-8"))
+        msg.attach(MIMEText(html, "html", "utf-8"))
 
         try:
             with smtplib.SMTP("smtp.gmail.com", 587) as server:
