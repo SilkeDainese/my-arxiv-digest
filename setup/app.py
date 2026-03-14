@@ -336,6 +336,37 @@ def suggest_categories(text):
     return sorted(scores, key=scores.get, reverse=True)[:5]
 
 
+def draft_research_description(keywords: dict[str, int]) -> str:
+    """Generate a first-person research description from keywords.
+
+    Uses Claude if an API key is available; falls back to a keyword sentence.
+    """
+    top_keywords = [k for k, _ in sorted(keywords.items(), key=lambda x: -x[1])[:10]]
+    api_key = _get_anthropic_key()
+
+    if api_key and _ANTHROPIC_AVAILABLE:
+        prompt = (
+            f"A researcher has these keywords extracted from their publications:\n"
+            f"{', '.join(top_keywords)}\n\n"
+            "Write a 3-4 sentence research description in first person (starting with 'I') "
+            "that this researcher could use to describe their work to a colleague. "
+            "Be specific and technical. Return only the description, no other text."
+        )
+        try:
+            client = _anthropic_lib.Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=200,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return response.content[0].text.strip()
+        except Exception:
+            pass
+
+    # Fallback: simple sentence from top keywords
+    return f"My research focuses on {', '.join(top_keywords[:5])}."
+
+
 def _get_anthropic_key() -> str | None:
     """Return Anthropic API key from Streamlit secrets or environment, or None."""
     try:
@@ -459,6 +490,16 @@ if "ai_suggested_cats" not in st.session_state:
     st.session_state.ai_suggested_cats = []
 if "ai_suggested_kws" not in st.session_state:
     st.session_state.ai_suggested_kws = {}
+# Profile prefill from ORCID scan
+if "profile_name" not in st.session_state:
+    st.session_state.profile_name = ""
+if "profile_institution" not in st.session_state:
+    st.session_state.profile_institution = ""
+if "profile_department" not in st.session_state:
+    st.session_state.profile_department = ""
+# Research description (editable, can be auto-drafted from publications)
+if "research_description" not in st.session_state:
+    st.session_state.research_description = ""
 
 
 # ─────────────────────────────────────────────────────────────
@@ -489,58 +530,13 @@ st.divider()
 
 
 # ─────────────────────────────────────────────────────────────
-#  Section 1: Your Profile
-# ─────────────────────────────────────────────────────────────
-
-st.markdown("## 2. Your Profile")
-
-col1, col2 = st.columns(2)
-with col1:
-    researcher_name = st.text_input("Your name", placeholder="Jane Smith")
-    institution = st.text_input("Institution (optional)", placeholder="Aarhus University")
-with col2:
-    digest_name = st.text_input("Digest name", value="arXiv Digest", help="Appears in the email subject line")
-    department = st.text_input("Department (optional)", placeholder="Dept. of Physics & Astronomy")
-
-tagline = st.text_input("Footer tagline (optional)", placeholder="Ad astra per aspera", help="A quote or motto for the email footer")
-
-# ── Self-match (your own name on arXiv) ──
-st.markdown("**Your name on arXiv** — if you publish a paper, you'll get a special celebration in your digest!")
-col1, col2 = st.columns([3, 1])
-with col1:
-    new_self = st.text_input("Author match pattern", placeholder="Smith, J", key="self_match_input", label_visibility="collapsed",
-                              help="How your name appears in arXiv author lists (e.g. 'Smith, J' or 'Jane Smith')")
-with col2:
-    if st.button("Add", key="add_self_match", use_container_width=True):
-        if new_self.strip() and new_self.strip() not in st.session_state.self_match:
-            st.session_state.self_match.append(new_self.strip())
-            st.rerun()
-
-if st.session_state.self_match:
-    to_remove = []
-    for pattern in st.session_state.self_match:
-        col1, col2 = st.columns([4, 1])
-        with col1:
-            st.markdown(f"- `{pattern}`")
-        with col2:
-            if st.button("✕", key=f"rm_self_{pattern}"):
-                to_remove.append(pattern)
-    for p in to_remove:
-        st.session_state.self_match.remove(p)
-        st.rerun()
-
-st.divider()
-
-
-# ─────────────────────────────────────────────────────────────
-#  Section 2: Profile Scan (optional)
+#  Section 1: Profile Scan (optional)
 # ─────────────────────────────────────────────────────────────
 
 st.markdown("## 1. Profile Scan (optional)")
 st.markdown(
-    "We can extract keywords from your publication history. "
-    "Search by name to find your ORCID profile, then extract keywords in one click. "
-    "Or paste a Pure portal URL directly if you prefer."
+    "Search ORCID to find your profile — we'll pre-fill your name, institution, "
+    "extract publication keywords, and draft your research description automatically."
 )
 
 if "pure_search_results" not in st.session_state:
@@ -550,13 +546,10 @@ if "pure_confirmed_url" not in st.session_state:
 
 if ai_assist:
     # ── AI mode: search by name via ORCID ──
-    st.markdown("**Search by name** to find your ORCID profile, then click **Use this** to extract keywords.")
     pure_search_name = st.text_input(
-        "Your name",
-        value=researcher_name or "",
+        "Search by name",
         placeholder="Jane Smith",
         key="pure_search_name",
-        label_visibility="collapsed",
     )
 
     if pure_search_name and st.button("🔍 Search ORCID", type="primary"):
@@ -570,7 +563,7 @@ if ai_assist:
                 "Try searching with just your last name, or a shorter version of your name."
             )
 
-    # Show search results — clicking "Use this" stores the ORCID URL and enables extraction
+    # Show search results — clicking "Use this" pre-fills profile + sets ORCID URL
     if st.session_state.pure_search_results:
         st.markdown("**Found on ORCID:**")
         for result in st.session_state.pure_search_results:
@@ -582,10 +575,14 @@ if ai_assist:
                 if st.button("Use this", key=f"select_orcid_{result['url']}"):
                     st.session_state.pure_confirmed_url = result["url"]
                     st.session_state.pure_scanned = False
+                    # Pre-fill profile fields from ORCID result
+                    st.session_state.profile_name = result["name"]
+                    if result["department"]:
+                        st.session_state.profile_institution = result["department"]
                     st.rerun()
 
     # Manual Pure URL entry for keyword/co-author extraction
-    with st.expander("Paste your Pure profile URL to extract keywords & co-authors"):
+    with st.expander("Paste your Pure profile URL instead"):
         pure_url_manual = st.text_input(
             "Pure profile URL",
             placeholder="https://pure.au.dk/portal/en/persons/your-name",
@@ -605,8 +602,7 @@ else:
     if pure_url_direct:
         st.session_state.pure_confirmed_url = pure_url_direct
 
-# ── Scan the confirmed Pure profile ──
-# Guard: ORCID URLs are not Pure pages and cannot be scraped for publications.
+# ── Scan the confirmed profile ──
 _confirmed = st.session_state.pure_confirmed_url
 _is_orcid_url = _confirmed.startswith("https://orcid.org/")
 
@@ -626,7 +622,16 @@ if _confirmed and _is_orcid_url and not st.session_state.pure_scanned:
                 merged = dict(st.session_state.keywords)
                 merged.update(keywords)
                 st.session_state.keywords = merged
-                st.success(f"Found {len(keywords)} keywords from your ORCID publications! Continue to step 3 to score them against your research description.")
+                # Auto-draft research description if not already written
+                if not st.session_state.research_description and _get_anthropic_key() and _ANTHROPIC_AVAILABLE:
+                    with st.spinner("Drafting your research description..."):
+                        st.session_state.research_description = draft_research_description(merged)
+                st.success(
+                    f"Found {len(keywords)} keywords from your ORCID publications! "
+                    "Your research description has been drafted in section 3 — edit it as needed."
+                    if st.session_state.research_description
+                    else f"Found {len(keywords)} keywords. Fill in section 3 to score them."
+                )
             st.rerun()
 
 elif _confirmed and _is_orcid_url and st.session_state.pure_scanned:
@@ -675,16 +680,66 @@ st.divider()
 
 
 # ─────────────────────────────────────────────────────────────
-#  Section 3: Research Context
+#  Section 2: Your Profile
+# ─────────────────────────────────────────────────────────────
+
+st.markdown("## 2. Your Profile")
+
+col1, col2 = st.columns(2)
+with col1:
+    researcher_name = st.text_input("Your name", placeholder="Jane Smith", key="profile_name")
+    institution = st.text_input("Institution (optional)", placeholder="Aarhus University", key="profile_institution")
+with col2:
+    digest_name = st.text_input("Digest name", value="arXiv Digest", help="Appears in the email subject line")
+    department = st.text_input("Department (optional)", placeholder="Dept. of Physics & Astronomy", key="profile_department")
+
+tagline = st.text_input("Footer tagline (optional)", placeholder="Ad astra per aspera", help="A quote or motto for the email footer")
+
+# ── Self-match (your own name on arXiv) ──
+st.markdown("**Your name on arXiv** — if you publish a paper, you'll get a special celebration in your digest!")
+col1, col2 = st.columns([3, 1])
+with col1:
+    new_self = st.text_input("Author match pattern", placeholder="Smith, J", key="self_match_input", label_visibility="collapsed",
+                              help="How your name appears in arXiv author lists (e.g. 'Smith, J' or 'Jane Smith')")
+with col2:
+    if st.button("Add", key="add_self_match", use_container_width=True):
+        if new_self.strip() and new_self.strip() not in st.session_state.self_match:
+            st.session_state.self_match.append(new_self.strip())
+            st.rerun()
+
+if st.session_state.self_match:
+    to_remove = []
+    for pattern in st.session_state.self_match:
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            st.markdown(f"- `{pattern}`")
+        with col2:
+            if st.button("✕", key=f"rm_self_{pattern}"):
+                to_remove.append(pattern)
+    for p in to_remove:
+        st.session_state.self_match.remove(p)
+        st.rerun()
+
+st.divider()
+
+
+# ─────────────────────────────────────────────────────────────
+#  Section 3: Research Description
 # ─────────────────────────────────────────────────────────────
 
 st.markdown("## 3. Your Research Description")
 
 if ai_assist:
-    st.markdown(
-        "Describe your research in 3-5 sentences, like you'd tell a colleague. "
-        "We'll use this to **suggest arXiv categories and score keywords** for you."
-    )
+    if st.session_state.research_description:
+        st.markdown(
+            "Auto-drafted from your publications — edit freely. "
+            "Then hit the button below to suggest categories and score your keywords."
+        )
+    else:
+        st.markdown(
+            "Describe your research in 3-5 sentences, like you'd tell a colleague. "
+            "We'll use this to **suggest arXiv categories and score keywords** for you."
+        )
 else:
     st.markdown("Describe your research in 3-5 sentences. This is what the AI uses to score papers.")
 
@@ -693,6 +748,7 @@ research_context = st.text_area(
     height=120,
     placeholder="I study exoplanet atmospheres using transmission spectroscopy with JWST and ground-based instruments. I focus on hot Jupiters and sub-Neptunes, particularly their atmospheric composition and cloud properties.",
     label_visibility="collapsed",
+    key="research_description",
 )
 
 # ── AI suggestions trigger ──
