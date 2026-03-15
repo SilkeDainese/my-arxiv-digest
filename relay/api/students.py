@@ -22,8 +22,10 @@ _spec.loader.exec_module(_registry)
 
 DEFAULT_MAX_PAPERS = _registry.DEFAULT_MAX_PAPERS
 build_student_record = _registry.build_student_record
+clamp_max_papers = _registry.clamp_max_papers
 now_iso = _registry.now_iso
 normalise_email = _registry.normalise_email
+normalise_package_ids = _registry.normalise_package_ids
 package_labels = _registry.package_labels
 public_record = _registry.public_record
 verify_password = _registry.verify_password
@@ -165,9 +167,16 @@ def _dispatch(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     return 400, {"error": "unknown action"}
 
 
-def _manage_page(email: str, mode: str) -> str:
+def _manage_page(
+    email: str,
+    mode: str,
+    package_ids: list[str] | None = None,
+    max_papers_per_week: int = DEFAULT_MAX_PAPERS,
+) -> str:
     """Return a simple browser-based student subscription management page."""
     safe_email = html.escape(email)
+    initial_packages = json.dumps(list(package_ids or []))
+    initial_max_papers = clamp_max_papers(max_papers_per_week)
     packages_markup = "\n".join(
         f"""
         <label class="package">
@@ -318,6 +327,8 @@ def _manage_page(email: str, mode: str) -> str:
     </main>
     <script>
       const mode = new URLSearchParams(window.location.search).get("mode") || "";
+      const initialPackages = {initial_packages};
+      const initialMaxPapers = {initial_max_papers};
       const statusEl = document.getElementById("status");
 
       function selectedPackages() {{
@@ -402,6 +413,8 @@ def _manage_page(email: str, mode: str) -> str:
       }} else {{
         setStatus("Enter your password, then load or save your package choices.");
       }}
+      document.getElementById("max_papers").value = initialMaxPapers;
+      setPackages(initialPackages);
     </script>
   </body>
 </html>"""
@@ -414,7 +427,17 @@ class handler(BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
         email = query.get("email", [""])[0]
         mode = query.get("mode", [""])[0]
-        page = _manage_page(email, mode)
+        raw_packages = query.get("packages", [""])[0]
+        package_ids: list[str]
+        if raw_packages.strip():
+            try:
+                package_ids = normalise_package_ids(raw_packages.split(","))
+            except ValueError:
+                package_ids = []
+        else:
+            package_ids = []
+        max_papers = clamp_max_papers(query.get("max_papers", [DEFAULT_MAX_PAPERS])[0])
+        page = _manage_page(email, mode, package_ids, max_papers)
         payload = page.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")

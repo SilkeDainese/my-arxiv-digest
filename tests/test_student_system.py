@@ -1,6 +1,10 @@
 import student_digest as sd
 from digest import _render_footer
-from setup.student_presets import build_au_student_config
+from setup.student_presets import (
+    build_au_student_config,
+    build_au_student_manage_url,
+    build_au_student_subscription_preview,
+)
 from student_digest import annotate_student_packages, make_student_digest_config, select_student_papers
 from student_registry import (
     build_student_record,
@@ -173,6 +177,36 @@ def test_build_au_student_config_treats_au_astronomy_as_implicit_baseline():
     assert config["student_tracks"] == ["AU Astronomy", "Galaxies", "Cosmology"]
     assert config["categories"] == ["astro-ph.GA", "astro-ph.CO"]
     assert "galaxies, and cosmology" in config["research_context"].lower()
+
+
+def test_build_au_student_manage_url_prefills_student_subscription_page():
+    url = build_au_student_manage_url(
+        "student@example.com",
+        ["galaxies", "cosmology"],
+        "biggest_only",
+        "https://example.com/api/students",
+    )
+
+    assert "email=student%40example.com" in url
+    assert "packages=galaxies%2Ccosmology" in url
+    assert "max_papers=4" in url
+
+
+def test_build_au_student_subscription_preview_has_no_config_yaml_fields():
+    preview = build_au_student_subscription_preview(
+        "Student Example",
+        "student@example.com",
+        ["stars"],
+        "simple_and_important",
+    )
+
+    assert preview == {
+        "student_name": "Student Example",
+        "email": "student@example.com",
+        "student_tracks": ["AU Astronomy", "Stars"],
+        "max_papers_per_week": 6,
+        "weekly_style": "Simple + important",
+    }
 
 
 def test_footer_uses_student_manage_links_when_present():

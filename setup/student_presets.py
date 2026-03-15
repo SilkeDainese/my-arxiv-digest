@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import urllib.parse
+
 from setup.data import (
     ASTRO_MINI_TRACKS,
     AU_ASTRONOMY_PEOPLE,
@@ -19,6 +21,61 @@ def _au_student_optional_track_ids() -> list[str]:
         for track_id in AU_STUDENT_TRACK_LABELS
         if track_id != "au_astronomy"
     ]
+
+
+def _normalised_au_student_tracks(track_ids: list[str]) -> list[str]:
+    """Return the selected optional AU-student tracks, or all of them by default."""
+    selected = [
+        track_id
+        for track_id in track_ids
+        if track_id in AU_STUDENT_TRACK_LABELS and track_id != "au_astronomy"
+    ]
+    return selected or _au_student_optional_track_ids()
+
+
+def default_au_student_max_papers(reading_mode: str) -> int:
+    """Return the recommended student max-papers setting for the chosen reading mode."""
+    return 4 if reading_mode == "biggest_only" else 6
+
+
+def build_au_student_subscription_preview(
+    student_name: str,
+    student_email: str,
+    track_ids: list[str],
+    reading_mode: str,
+) -> dict:
+    """Return the central-subscription preview shown in the hidden AU-student setup."""
+    selected = _normalised_au_student_tracks(track_ids)
+    labels = [AU_STUDENT_TRACK_LABELS[track_id] for track_id in selected]
+    return {
+        "student_name": student_name.strip() or "AU Astronomy Student",
+        "email": student_email.strip(),
+        "student_tracks": [AU_STUDENT_ALWAYS_TAG, *labels],
+        "max_papers_per_week": default_au_student_max_papers(reading_mode),
+        "weekly_style": (
+            "Only the biggest papers"
+            if reading_mode == "biggest_only"
+            else "Simple + important"
+        ),
+    }
+
+
+def build_au_student_manage_url(
+    student_email: str,
+    track_ids: list[str],
+    reading_mode: str,
+    base_url: str,
+) -> str:
+    """Return a prefilled manage-page URL for the central AU student subscription flow."""
+    selected = _normalised_au_student_tracks(track_ids)
+    query = urllib.parse.urlencode(
+        {
+            "email": student_email.strip(),
+            "packages": ",".join(selected),
+            "max_papers": default_au_student_max_papers(reading_mode),
+        }
+    )
+    return f"{base_url.rstrip('?')}?{query}"
 
 
 def _merge_mini_keywords(track_ids: list[str]) -> dict[str, int]:
@@ -135,11 +192,7 @@ def build_au_student_config(
     student_name: str, student_email: str, track_ids: list[str], reading_mode: str
 ) -> dict:
     """Build a hidden AU-student digest config with AU astronomy defaults."""
-    selected = [
-        track_id
-        for track_id in track_ids
-        if track_id in AU_STUDENT_TRACK_LABELS and track_id != "au_astronomy"
-    ] or _au_student_optional_track_ids()
+    selected = _normalised_au_student_tracks(track_ids)
     categories: list[str] = []
     for track_id in selected:
         for category in ASTRO_MINI_TRACKS.get(track_id, {}).get("categories", []):
@@ -183,6 +236,6 @@ def build_au_student_config(
         "smtp_server": "smtp.gmail.com",
         "smtp_port": 587,
         "github_repo": "",
-        "max_papers": 4 if reading_mode == "biggest_only" else 6,
+        "max_papers": default_au_student_max_papers(reading_mode),
         "min_score": 6 if reading_mode == "biggest_only" else 4,
     }

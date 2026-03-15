@@ -106,8 +106,15 @@ def test_registry_dispatch_lifecycle(monkeypatch):
 
 
 def test_manage_page_includes_password_rotation_field():
-    page = students_api._manage_page("student@example.com", "unsubscribe")
+    page = students_api._manage_page(
+        "student@example.com",
+        "unsubscribe",
+        ["stars", "galaxies"],
+        4,
+    )
 
     assert "student@example.com" in page
     assert "New password (optional)" in page
     assert "Enter your password and click Unsubscribe." in page
+    assert 'const initialPackages = ["stars", "galaxies"]' in page
+    assert "const initialMaxPapers = 4" in page

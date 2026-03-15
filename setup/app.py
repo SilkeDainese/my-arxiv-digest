@@ -50,7 +50,12 @@ from data import (
     ARXIV_GROUP_HINTS,
     CATEGORY_HINTS,
 )
-from setup.student_presets import build_au_student_config, build_mini_student_config
+from setup.student_presets import (
+    build_au_student_config,
+    build_au_student_manage_url,
+    build_au_student_subscription_preview,
+    build_mini_student_config,
+)
 try:
     from pure_scraper import (
         fetch_orcid_person,
@@ -118,6 +123,10 @@ st.markdown(
 
 
 _ORCID_ID_RE = re.compile(r"^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$")
+DEFAULT_STUDENT_MANAGE_URL = os.environ.get(
+    "STUDENT_MANAGE_URL",
+    "https://arxiv-digest-relay.vercel.app/api/students",
+).strip()
 
 
 def _weight_label(w: int) -> str:
@@ -442,30 +451,43 @@ def render_au_student_setup() -> None:
         st.info("Pick at least one astronomy area.")
         return
 
-    config = build_au_student_config(student_name, student_email, selected_tracks, reading_mode)
-    config_yaml = yaml.dump(
-        config, default_flow_style=False, sort_keys=False, allow_unicode=True
+    preview = build_au_student_subscription_preview(
+        student_name,
+        student_email,
+        selected_tracks,
+        reading_mode,
+    )
+    preview_yaml = yaml.dump(
+        preview, default_flow_style=False, sort_keys=False, allow_unicode=True
+    )
+    manage_url = build_au_student_manage_url(
+        student_email,
+        selected_tracks,
+        reading_mode,
+        DEFAULT_STUDENT_MANAGE_URL,
     )
 
-    st.markdown("### AU student config.yaml")
-    st.code(config_yaml, language="yaml")
+    st.markdown("### AU student subscription preview")
+    st.code(preview_yaml, language="yaml")
     st.caption(
-        "This mode is designed for a shared AU-student digest preset. It includes the recipient email directly in config.yaml."
+        "This hidden mode writes to the shared AU-student subscription system. Students do not need a fork, config.yaml, or repo secrets."
     )
 
-    st.download_button(
-        label="📥 Download AU student config.yaml",
-        data=config_yaml,
-        file_name="config.yaml",
-        mime="text/yaml",
-        type="primary",
-        use_container_width=True,
+    st.markdown("### Continue to the subscription page")
+    st.markdown(
+        f"[Open the AU student subscription page]({manage_url})"
     )
+    st.code(manage_url, language="text")
     st.caption(
-        "Why a config file? The digest reads config.yaml from the repo on every run. This AU-student preset is the standard package, and later edits happen by replacing or editing that file."
+        "Open that link, choose a password, and click Save packages. The email, interests, and recommended max-papers setting will already be prefilled."
     )
-
-    _render_repo_setup_steps("0 7 * * 1", recipient_in_config=True)
+    st.markdown("### Next steps")
+    st.markdown(
+        "1. Open the subscription page above.\n"
+        "2. Enter a password for that student.\n"
+        "3. Click `Save packages` to create or update the subscription.\n"
+        "4. Later edits happen from the email footer or the same manage page."
+    )
 
 
 
