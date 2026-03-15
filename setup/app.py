@@ -12,6 +12,8 @@ import os
 import re
 import sys
 import time
+import urllib.error
+import urllib.request
 from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
@@ -37,11 +39,10 @@ except ImportError:
 # Allow imports from the project root (one level up from setup/)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from brand import PINE, GOLD, CARD_BORDER, WARM_GREY
+from brand import ASH_WHITE, CARD_BORDER, GOLD, GOLD_WASH, PINE, WARM_GREY
 from data import (
     ASTRO_MINI_TRACKS,
     AU_STUDENT_TRACK_LABELS,
-    AU_STUDENT_ALWAYS_TAG,
     AU_ASTRONOMY_PEOPLE,
     AU_STUDENT_TELESCOPE_KEYWORDS,
     AU_STUDENT_KEYWORD_ALIASES,
@@ -50,11 +51,13 @@ from data import (
     ARXIV_GROUP_HINTS,
     CATEGORY_HINTS,
 )
-from setup.student_presets import (
-    build_au_student_config,
-    build_au_student_manage_url,
-    build_au_student_subscription_preview,
-    build_mini_student_config,
+from setup.student_presets import build_mini_student_config
+from student_registry import AVAILABLE_STUDENT_PACKAGES, DEFAULT_MAX_PAPERS
+from style import inject_css
+from validators import (
+    validate_au_email,
+    validate_package_selection,
+    validate_password,
 )
 try:
     from pure_scraper import (
@@ -79,47 +82,7 @@ st.set_page_config(
 )
 
 # ── Custom CSS for brand styling ──
-st.markdown(
-    f"""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=IBM+Plex+Sans:wght@300;400;600&family=DM+Mono:wght@400&display=swap');
-
-    h1, h2, h3 {{ font-family: 'DM Serif Display', Georgia, serif !important; }}
-    .stMarkdown p, .stMarkdown li {{ font-family: 'IBM Plex Sans', sans-serif; }}
-    code, .stCode {{ font-family: 'DM Mono', monospace !important; }}
-
-    /* Brand card styling */
-    .brand-card {{
-        background: white;
-        border: 1px solid {CARD_BORDER};
-        border-radius: 6px;
-        padding: 24px;
-        margin: 12px 0;
-    }}
-    .brand-label {{
-        font-family: 'DM Mono', monospace;
-        font-size: 10px;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-        color: {WARM_GREY};
-    }}
-    .step-number {{
-        display: inline-block;
-        background: {PINE};
-        color: white;
-        width: 28px;
-        height: 28px;
-        border-radius: 50%;
-        text-align: center;
-        line-height: 28px;
-        font-family: 'DM Mono', monospace;
-        font-size: 14px;
-        margin-right: 8px;
-    }}
-</style>
-""",
-    unsafe_allow_html=True,
-)
+inject_css()
 
 
 _ORCID_ID_RE = re.compile(r"^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$")
@@ -127,6 +90,12 @@ DEFAULT_STUDENT_MANAGE_URL = os.environ.get(
     "STUDENT_MANAGE_URL",
     "https://arxiv-digest-relay.vercel.app/api/students",
 ).strip()
+AU_STUDENT_PACKAGE_DESCRIPTIONS = {
+    "stars": "Stellar evolution, atmospheres, activity, binaries, and variable stars.",
+    "exoplanets": "Detection, characterisation, atmospheres, habitability, and planetary systems.",
+    "galaxies": "Galaxy formation, evolution, morphology, AGN, groups, and clusters.",
+    "cosmology": "Dark energy, large-scale structure, the early universe, and inflation.",
+}
 
 
 def _weight_label(w: int) -> str:
@@ -252,49 +221,100 @@ def _set_selected_papers(titles: list[str]) -> None:
 
 def _render_repo_setup_steps(cron_expr: str, *, recipient_in_config: bool = False) -> None:
     """Show the GitHub-side steps after generating a downloadable config."""
-    secrets_html = """
-<p><span class="step-number">3</span> <strong>Add secrets</strong></p>
-<p style="margin-left: 36px;">
-Add <code>RECIPIENT_EMAIL</code> plus either <code>DIGEST_RELAY_TOKEN</code> or your own
-<code>SMTP_USER</code> and <code>SMTP_PASSWORD</code> in your fork’s
-<strong>Settings → Secrets and variables → Actions</strong>.
-</p>
-"""
-    if recipient_in_config:
-        secrets_html = """
-<p><span class="step-number">3</span> <strong>Add secrets</strong></p>
-<p style="margin-left: 36px;">
-Add either <code>DIGEST_RELAY_TOKEN</code> or your own <code>SMTP_USER</code> and
-<code>SMTP_PASSWORD</code> in your fork’s <strong>Settings → Secrets and variables → Actions</strong>.
-<code>RECIPIENT_EMAIL</code> is optional here because this preset already writes the student email into <code>config.yaml</code>.
-</p>
-"""
-
     st.divider()
     st.markdown("## Next Steps")
     st.markdown(
         f"""
 <div class="brand-card">
-<p><span class="step-number">1</span> <strong>Fork the template repo</strong></p>
-<p style="margin-left: 36px;">
-Fork <a href="https://github.com/SilkeDainese/arxiv-digest" target="_blank">SilkeDainese/arxiv-digest</a>.
-</p>
+<p class="brand-label" style="margin-bottom: 16px;">After setup</p>
 
-<p><span class="step-number">2</span> <strong>Upload your config.yaml</strong></p>
-<p style="margin-left: 36px;">
-In your fork, click <strong>Add file → Upload files</strong> and upload the <code>config.yaml</code>
-you just downloaded. This file is the digest’s editable source of truth: later changes to interests,
-keywords, or schedule happen by editing <code>config.yaml</code> in GitHub or by rerunning the setup wizard
-and uploading a new one.
+<div style="display: flex; gap: 10px; align-items: flex-start; margin-bottom: 14px;">
+<span class="step-number">1</span>
+<div>
+<p style="margin: 0;"><strong>Fork the repo</strong></p>
+<p style="margin: 2px 0 0; color: {WARM_GREY};">
+<a href="https://github.com/SilkeDainese/arxiv-digest" target="_blank" style="color: {PINE};">
+SilkeDainese/arxiv-digest
+</a>
+→ Fork
 </p>
+</div>
+</div>
 
-{secrets_html}
-
-<p><span class="step-number">4</span> <strong>Switch the workflow to weekly</strong></p>
-<p style="margin-left: 36px;">
-Replace the cron line in <code>.github/workflows/digest.yml</code> with:
+<div style="display: flex; gap: 10px; align-items: flex-start; margin-bottom: 14px;">
+<span class="step-number">2</span>
+<div>
+<p style="margin: 0;"><strong>Upload config.yaml</strong></p>
+<p style="margin: 2px 0 0; color: {WARM_GREY};">
+Add file → Upload → drop <code>config.yaml</code> → Commit.
 </p>
-<pre style="margin-left: 36px;"><code>    - cron: '{cron_expr}'</code></pre>
+</div>
+</div>
+
+<div style="display: flex; gap: 10px; align-items: flex-start; margin-bottom: 4px;">
+<span class="step-number">3</span>
+<div style="flex: 1;">
+<p style="margin: 0;"><strong>Add secrets</strong></p>
+<p style="margin: 2px 0 0; color: {WARM_GREY};">Settings → Secrets → Actions</p>
+</div>
+</div>
+
+<div style="margin: 4px 0 14px 38px; border: 1px solid {CARD_BORDER}; border-radius: 8px; overflow: hidden;">
+<table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+<thead>
+<tr style="border-bottom: 1px solid {CARD_BORDER}; background: {ASH_WHITE};">
+<th class="brand-label" style="text-align: left; padding: 8px 10px;">Secret</th>
+<th class="brand-label" style="text-align: left; padding: 8px 10px;">Value</th>
+<th class="brand-label" style="text-align: center; padding: 8px 10px; width: 86px;">Required</th>
+</tr>
+</thead>
+<tbody>
+<tr style="border-bottom: 1px solid {CARD_BORDER};">
+<td style="padding: 8px 10px;"><code>RECIPIENT_EMAIL</code></td>
+<td style="padding: 8px 10px; color: {WARM_GREY};">Your email address</td>
+<td style="padding: 8px 10px; text-align: center; color: {PINE}; font-weight: 600;">Yes</td>
+</tr>
+<tr style="border-bottom: 1px solid {CARD_BORDER}; background: {GOLD_WASH};">
+<td colspan="3" style="padding: 6px 10px; font-weight: 600;">Email delivery — pick one:</td>
+</tr>
+<tr style="border-bottom: 1px solid {CARD_BORDER};">
+<td style="padding: 8px 10px;"><code>RELAY_TOKEN</code></td>
+<td style="padding: 8px 10px; color: {WARM_GREY};">From access code — no email setup needed</td>
+<td style="padding: 8px 10px; text-align: center; color: {WARM_GREY};">Option A</td>
+</tr>
+<tr style="border-bottom: 1px solid {CARD_BORDER};">
+<td style="padding: 8px 10px;"><code>SMTP_USER</code> + <code>SMTP_PASSWORD</code></td>
+<td style="padding: 8px 10px; color: {WARM_GREY};">Gmail/Outlook + App Password</td>
+<td style="padding: 8px 10px; text-align: center; color: {WARM_GREY};">Option B</td>
+</tr>
+<tr style="border-bottom: 1px solid {CARD_BORDER}; background: {GOLD_WASH};">
+<td colspan="3" style="padding: 6px 10px; font-weight: 600;">AI scoring — optional:</td>
+</tr>
+<tr style="border-bottom: 1px solid {CARD_BORDER};">
+<td style="padding: 8px 10px;"><code>GEMINI_API_KEY</code></td>
+<td style="padding: 8px 10px; color: {WARM_GREY};">
+<a href="https://aistudio.google.com" target="_blank" style="color: {PINE};">Free key</a> → aistudio.google.com
+</td>
+<td style="padding: 8px 10px; text-align: center; color: {WARM_GREY};">Free</td>
+</tr>
+<tr>
+<td style="padding: 8px 10px;"><code>ANTHROPIC_API_KEY</code></td>
+<td style="padding: 8px 10px; color: {WARM_GREY};">
+<a href="https://console.anthropic.com" target="_blank" style="color: {PINE};">console.anthropic.com</a>
+</td>
+<td style="padding: 8px 10px; text-align: center; color: {WARM_GREY};">Paid</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div style="display: flex; gap: 10px; align-items: flex-start;">
+<span class="step-number">4</span>
+<div>
+<p style="margin: 0;"><strong>Allow Actions &amp; run workflow</strong></p>
+<p style="margin: 2px 0 0; color: {WARM_GREY};">Actions tab → Enable workflows → Run workflow.</p>
+</div>
+</div>
 </div>
 """,
         unsafe_allow_html=True,
@@ -335,6 +355,60 @@ def render_mini_setup() -> None:
             st.markdown(f"**{track['label']}**")
             st.caption(track["blurb"])
 
+    # Keywords as editable chips (seeded from track presets)
+    track_keywords = _merge_mini_keywords(selected_tracks)
+    if "mini_keywords" not in st.session_state:
+        st.session_state.mini_keywords = dict(track_keywords)
+
+    # Re-seed when tracks change
+    _track_key = tuple(sorted(selected_tracks))
+    if st.session_state.get("_mini_last_tracks") != _track_key:
+        st.session_state.mini_keywords = dict(track_keywords)
+        st.session_state["_mini_last_tracks"] = _track_key
+
+    all_kw_options = list(st.session_state.mini_keywords.keys())
+    selected_kws = st.multiselect(
+        "Keywords",
+        options=all_kw_options,
+        default=all_kw_options,
+        key="mini_kw_chips",
+        help="Topics your digest looks for. Each gets a default weight of 7.",
+    )
+
+    # Add custom keyword
+    kw_col, btn_col = st.columns([4, 1])
+    with kw_col:
+        new_kw = st.text_input(
+            "Add a keyword",
+            key="mini_new_kw",
+            label_visibility="collapsed",
+            placeholder="Add a keyword...",
+        )
+    with btn_col:
+        if st.button("Add", key="mini_add_kw", use_container_width=True) and new_kw.strip():
+            st.session_state.mini_keywords[new_kw.strip()] = 7
+            st.rerun()
+
+    # Sync chips → keywords dict
+    synced_keywords = {}
+    for kw in selected_kws:
+        synced_keywords[kw] = st.session_state.mini_keywords.get(kw, 7)
+    st.session_state.mini_keywords = synced_keywords
+
+    with st.expander("Advanced keyword settings"):
+        st.caption(
+            "Fine-tune weight (0–10). **0–2** loosely follow · **3–5** interested · **6–8** main interest · **9–10** everything"
+        )
+        for kw in list(st.session_state.mini_keywords.keys()):
+            weight = st.slider(
+                kw,
+                min_value=0,
+                max_value=10,
+                value=st.session_state.mini_keywords[kw],
+                key=f"mini_kw_w_{kw}",
+            )
+            st.session_state.mini_keywords[kw] = weight
+
     smtp_options = {
         "Gmail": ("smtp.gmail.com", 587),
         "Outlook / Office 365": ("smtp.office365.com", 587),
@@ -357,6 +431,8 @@ def render_mini_setup() -> None:
     config, cron_expr = build_mini_student_config(
         selected_tracks, smtp_server, smtp_port, github_repo
     )
+    # Override keywords with user-edited version
+    config["keywords"] = dict(st.session_state.mini_keywords)
     config_yaml = yaml.dump(
         config, default_flow_style=False, sort_keys=False, allow_unicode=True
     )
@@ -394,100 +470,225 @@ def render_mini_setup() -> None:
     _render_repo_setup_steps(cron_expr)
 
 
+def _post_au_student_subscription(payload: dict) -> dict:
+    """Create or update an AU student subscription through the relay endpoint."""
+    request = urllib.request.Request(
+        DEFAULT_STUDENT_MANAGE_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="ignore")
+        try:
+            error_payload = json.loads(body)
+        except json.JSONDecodeError:
+            error_payload = {}
+        message = str(error_payload.get("error") or body or exc.reason)
+        raise RuntimeError(message) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(
+            f"Could not reach the AU student relay at {DEFAULT_STUDENT_MANAGE_URL}: {exc.reason}"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("The AU student relay returned invalid JSON.") from exc
+
+
 def render_au_student_setup() -> None:
     """Render the hidden AU-student setup flow."""
+    if "au_student_step" not in st.session_state:
+        st.session_state.au_student_step = 1
+    if "au_student_api_response" not in st.session_state:
+        st.session_state.au_student_api_response = None
+    if "au_student_response_email" not in st.session_state:
+        st.session_state.au_student_response_email = ""
+
     st.markdown("## AU astronomy student setup")
     st.markdown(
-        "Hidden lightweight setup for Aarhus astronomy students. Enter the student's name and email, then pick the astronomy areas they should follow."
+        "AI scoring and email relay provided courtesy. You just need an AU email and to set a password."
     )
+    st.caption(f"relay: {DEFAULT_STUDENT_MANAGE_URL}")
 
-    student_name = st.text_input(
-        "Student name",
-        placeholder="Astronomy student",
-        key="au_student_name",
-    )
-    student_email = st.text_input(
-        "Student email",
-        placeholder="student@post.au.dk",
-        key="au_student_email",
-    )
+    with st.expander(
+        "**1. Your AU Account**",
+        expanded=(st.session_state.au_student_step == 1),
+    ):
+        st.markdown(
+            "Log in or create your student subscription. Only `@uni.au.dk` emails are accepted."
+        )
+        email_cols = st.columns([2, 1])
+        with email_cols[0]:
+            st.text_input(
+                "AU email",
+                placeholder="au612345",
+                key="au_student_email_local",
+            )
+        with email_cols[1]:
+            st.markdown("")
+            st.markdown("`@uni.au.dk`")
 
-    selectable_tracks = [
-        track_id
-        for track_id in AU_STUDENT_TRACK_LABELS
-        if track_id != "au_astronomy"
-    ]
+        email_ok, email_message = validate_au_email(
+            st.session_state.get("au_student_email_local", "")
+        )
+        if email_ok:
+            st.caption(email_message)
+        else:
+            st.caption("Format: au + 6 digits (for example `au612345@uni.au.dk`).")
 
-    selected_tracks = st.multiselect(
-        "Astronomy interests",
-        options=selectable_tracks,
-        default=selectable_tracks,
-        format_func=lambda key: AU_STUDENT_TRACK_LABELS[key],
-        help="Choose the optional astronomy interests to layer on top of the always-included AU astronomy baseline.",
-    )
+        password_cols = st.columns(2)
+        with password_cols[0]:
+            st.text_input(
+                "Password",
+                type="password",
+                placeholder="choose a password",
+                key="au_student_password",
+            )
+        with password_cols[1]:
+            st.text_input(
+                "Confirm",
+                type="password",
+                placeholder="repeat password",
+                key="au_student_password_confirm",
+            )
 
-    reading_mode = st.radio(
-        "Weekly style",
-        options=["simple_and_important", "biggest_only"],
-        format_func=lambda mode: {
-            "simple_and_important": "Simple + important",
-            "biggest_only": "Only the biggest papers",
-        }[mode],
-        horizontal=True,
-    )
+        if st.button(
+            "Continue ->",
+            key="au_student_step1_continue",
+            type="primary",
+            use_container_width=True,
+        ):
+            email_ok, email_message = validate_au_email(
+                st.session_state.get("au_student_email_local", "")
+            )
+            if not email_ok:
+                st.error(email_message or "Enter your AU email as au + 6 digits.")
+            else:
+                password_ok, password_message = validate_password(
+                    st.session_state.get("au_student_password", ""),
+                    st.session_state.get("au_student_password_confirm", ""),
+                )
+                if not password_ok:
+                    st.error(password_message or "Enter and confirm a password.")
+                else:
+                    st.session_state.au_student_email_full = email_message
+                    st.session_state.au_student_step = 2
+                    st.session_state.au_student_api_response = None
+                    st.session_state.au_student_response_email = ""
+                    st.rerun()
 
-    st.markdown("**Always included on top of the selected tracks**")
-    st.caption(
-        "AU Astronomy is included for every student digest: AU astronomy papers, AU-run telescope keywords, and AU student-space projects."
-    )
-    st.caption(
-        f"`{AU_STUDENT_ALWAYS_TAG}` is not a normal toggle here. It is added automatically for every AU student config."
-    )
+    with st.expander(
+        "**2. Your Interests**",
+        expanded=(st.session_state.au_student_step == 2),
+    ):
+        if st.session_state.au_student_step < 2:
+            st.caption("Complete Step 1 first.")
+        else:
+            st.markdown(
+                "Pick the topic packages you want in your weekly digest. Select at least one."
+            )
+            selected_packages: list[str] = []
+            package_cols = st.columns(2)
+            for idx, package_id in enumerate(AVAILABLE_STUDENT_PACKAGES):
+                with package_cols[idx % 2]:
+                    if st.checkbox(
+                        AU_STUDENT_TRACK_LABELS[package_id],
+                        key=f"au_student_package_{package_id}",
+                    ):
+                        selected_packages.append(package_id)
+                    st.caption(AU_STUDENT_PACKAGE_DESCRIPTIONS.get(package_id, ""))
 
-    if not student_email.strip():
-        st.info("Enter an email to generate the AU-student config.")
-        return
-    if not selected_tracks:
-        st.info("Pick at least one astronomy area.")
-        return
+            if st.button(
+                "Continue ->",
+                key="au_student_step2_continue",
+                type="primary",
+                use_container_width=True,
+            ):
+                packages_ok, _ = validate_package_selection(selected_packages)
+                if not packages_ok:
+                    st.error("Select at least one topic")
+                else:
+                    st.session_state.au_student_selected_packages = selected_packages
+                    st.session_state.au_student_step = 3
+                    st.session_state.au_student_api_response = None
+                    st.session_state.au_student_response_email = ""
+                    st.rerun()
 
-    preview = build_au_student_subscription_preview(
-        student_name,
-        student_email,
-        selected_tracks,
-        reading_mode,
-    )
-    preview_yaml = yaml.dump(
-        preview, default_flow_style=False, sort_keys=False, allow_unicode=True
-    )
-    manage_url = build_au_student_manage_url(
-        student_email,
-        selected_tracks,
-        reading_mode,
-        DEFAULT_STUDENT_MANAGE_URL,
-    )
+    with st.expander(
+        "**3. Settings & Subscribe**",
+        expanded=(st.session_state.au_student_step == 3),
+    ):
+        if st.session_state.au_student_step < 3:
+            st.caption("Complete Steps 1 and 2 first.")
+        else:
+            st.markdown("Student digests are sent weekly. Choose how many papers to include.")
+            max_papers_per_week = st.radio(
+                "How many papers?",
+                options=[DEFAULT_MAX_PAPERS, 15],
+                format_func=lambda value: (
+                    "Highlights (6)"
+                    if value == DEFAULT_MAX_PAPERS
+                    else "In-depth (15)"
+                ),
+                horizontal=True,
+                key="au_student_max_papers_per_week",
+            )
 
-    st.markdown("### AU student subscription preview")
-    st.code(preview_yaml, language="yaml")
-    st.caption(
-        "This hidden mode writes to the shared AU-student subscription system. Students do not need a fork, config.yaml, or repo secrets."
-    )
+            selected_packages = st.session_state.get("au_student_selected_packages", [])
+            full_email = st.session_state.get("au_student_email_full", "")
+            if full_email:
+                st.caption(
+                    f"{full_email} · {len(selected_packages)} topic(s) · Weekly · {max_papers_per_week} papers"
+                )
 
-    st.markdown("### Continue to the subscription page")
-    st.markdown(
-        f"[Open the AU student subscription page]({manage_url})"
-    )
-    st.code(manage_url, language="text")
-    st.caption(
-        "Open that link, choose a password, and click Save packages. The email, interests, and recommended max-papers setting will already be prefilled."
-    )
-    st.markdown("### Next steps")
-    st.markdown(
-        "1. Open the subscription page above.\n"
-        "2. Enter a password for that student.\n"
-        "3. Click `Save packages` to create or update the subscription.\n"
-        "4. Later edits happen from the email footer or the same manage page."
-    )
+            if st.button(
+                "Subscribe",
+                key="au_student_subscribe",
+                type="primary",
+                use_container_width=True,
+            ):
+                payload = {
+                    "action": "upsert",
+                    "email": full_email,
+                    "password": st.session_state.get("au_student_password", ""),
+                    "new_password": "",
+                    "package_ids": selected_packages,
+                    "max_papers_per_week": int(max_papers_per_week),
+                }
+                try:
+                    response = _post_au_student_subscription(payload)
+                except RuntimeError as exc:
+                    st.error(str(exc))
+                else:
+                    subscription = response.get("subscription", {})
+                    st.session_state.au_student_api_response = {
+                        "ok": bool(response.get("ok")),
+                        "subscription": {
+                            "package_ids": list(
+                                subscription.get("package_ids", selected_packages)
+                            ),
+                            "max_papers_per_week": int(
+                                subscription.get(
+                                    "max_papers_per_week", max_papers_per_week
+                                )
+                            ),
+                        },
+                        "confirmation_email_sent": bool(
+                            response.get("confirmation_email_sent", False)
+                        ),
+                    }
+                    st.session_state.au_student_response_email = full_email
+                    st.rerun()
+
+            response_payload = st.session_state.get("au_student_api_response")
+            response_email = st.session_state.get("au_student_response_email", "")
+            if response_payload and response_email:
+                local_part = response_email.split("@", 1)[0]
+                st.success(f"Confirmation email sent to {local_part}@uni.au.dk")
+                with st.expander("View API response"):
+                    st.json(response_payload)
 
 
 
@@ -1122,9 +1323,11 @@ if "research_description" not in st.session_state:
     st.session_state.research_description = ""
 if "_research_description_val" not in st.session_state:
     st.session_state._research_description_val = ""
-# Wizard step tracking — 1-indexed, controls which expander is open
+# Wizard step tracking — 1-indexed, controls which setup steps are revealed
 if "current_step" not in st.session_state:
     st.session_state.current_step = 1
+else:
+    st.session_state.current_step = max(1, min(int(st.session_state.current_step), 4))
 if "profile_mode" not in st.session_state:
     st.session_state.profile_mode = "individual"
 # Paper selector: subset of fetched ORCID titles to use for keyword/category AI suggestions
@@ -1291,7 +1494,7 @@ st.session_state.profile_mode = profile_mode
 
 
 # ─────────────────────────────────────────────────────────────
-#  Section 1: Profile Scan (optional)
+#  Step 1 helpers: ORCID import and preview
 # ─────────────────────────────────────────────────────────────
 
 if "pure_confirmed_url" not in st.session_state:
@@ -1415,7 +1618,16 @@ def _commit_preview() -> None:
     st.session_state.orcid_preview = None
 
 
-with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step == 1)):
+# ─────────────────────────────────────────────────────────────
+#  Step 1: About You
+# ─────────────────────────────────────────────────────────────
+
+if st.session_state.current_step >= 1:
+    st.markdown(
+        '<p><span class="step-number">1</span> <strong>About You</strong></p>',
+        unsafe_allow_html=True,
+    )
+
     if profile_mode == "group":
         st.markdown(
             "ORCID import is optional for groups. You can skip this step and configure the group manually, or import up to 8 member ORCIDs to bootstrap shared keywords, categories, and colleague suggestions."
@@ -1472,7 +1684,6 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
     show_import_controls = profile_mode == "group" or not st.session_state.pure_scanned
 
     if show_import_controls:
-        # ── ORCID input ──
         col_input, col_btn = st.columns([5, 1])
         with col_input:
             orcid_input = st.text_input(
@@ -1496,7 +1707,6 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
 
         if orcid_input and fetch_clicked:
             inp = orcid_input.strip().rstrip("/")
-            # Accept bare ID or full URL
             if inp.startswith("https://orcid.org/"):
                 orcid_id = inp.split("/")[-1]
                 orcid_url = inp
@@ -1522,14 +1732,11 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
                         coauthor_map,
                         coauthor_counts,
                         works_error,
-                    ) = (
-                        fetch_orcid_works(orcid_id)
-                    )
+                    ) = fetch_orcid_works(orcid_id)
 
                 if person_error:
                     st.error(f"Could not fetch profile: {person_error}")
                 else:
-                    # Find AU colleagues in the background (parallel ORCID checks)
                     au_colleagues: list[str] = []
                     if _PURE_AVAILABLE and coauthor_map:
                         with st.spinner(
@@ -1541,7 +1748,6 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
                                 institution=institution or "Aarhus University",
                             )
 
-                    # Build research summary from titles using AI
                     research_summary = ""
                     if titles and ai_assist:
                         with st.spinner("Summarising your research..."):
@@ -1581,15 +1787,14 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
                         "orcid_url": orcid_url,
                         "keywords": keywords or {},
                         "titles": titles or [],
-                        # Per-paper metadata (title + year) for smart pre-selection
                         "works_meta": works_meta or [],
                         "au_colleagues": au_colleagues,
                         "all_coauthors": sorted_coauthors,
-                        # Raw coauthor map retained for frequency counting in suggested-colleagues
                         "coauthor_map": dict(coauthor_map) if coauthor_map else {},
-                        "coauthor_counts": dict(coauthor_counts) if coauthor_counts else {},
+                        "coauthor_counts": (
+                            dict(coauthor_counts) if coauthor_counts else {}
+                        ),
                         "research_summary": research_summary,
-                        # Track which colleagues the user wants to import
                         "selected_colleagues": list(au_colleagues),
                     }
                     if works_error:
@@ -1597,7 +1802,6 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
                             "Profile found but no publications on ORCID — keywords and colleagues will be empty."
                         )
 
-        # ── Review card: show what was found, let user correct ──
         if st.session_state.orcid_preview:
             p = st.session_state.orcid_preview
             st.markdown(f"**{p['name']}** · {p['institution']}")
@@ -1613,11 +1817,9 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
             else:
                 st.caption("No keywords found — you can add them manually below.")
 
-            # ── Colleagues ──
             st.markdown(
                 "**Colleagues to track** — papers by these people always appear in your digest:"
             )
-            # Preserve manually added colleagues across re-renders
             p.setdefault("selected_colleagues", [])
 
             if p.get("au_colleagues"):
@@ -1635,13 +1837,11 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
                     if checked:
                         selected.append(colleague)
                 p["selected_colleagues"] = selected
-            else:
-                if p.get("titles"):
-                    st.caption(
-                        f"No co-authors with confirmed {p['institution']} affiliation found automatically."
-                    )
+            elif p.get("titles"):
+                st.caption(
+                    f"No co-authors with confirmed {p['institution']} affiliation found automatically."
+                )
 
-            # Show manually added colleagues (not from auto-detection)
             manual_added = [
                 c
                 for c in p["selected_colleagues"]
@@ -1662,7 +1862,6 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
                 if to_remove:
                     st.rerun()
 
-            # Manual add by ORCID — for colleagues not found automatically
             st.caption("Add a colleague by their ORCID:")
             extra_col, extra_btn = st.columns([4, 1])
             with extra_col:
@@ -1701,7 +1900,6 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
                         )
                         st.rerun()
 
-            # Pick from all co-authors on previous papers (already fetched from ORCID)
             all_coauthors = p.get("all_coauthors", [])
             _coauthor_blocklist = _group_member_names(p.get("name", ""))
             pickable = [
@@ -1712,25 +1910,22 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
             ]
             if pickable:
                 st.markdown(f"**Or pick from your {len(all_coauthors)} ORCID co-authors**")
-                if True:
-                    pick_filter = st.text_input(
-                        "Filter by name",
-                        key="coauthor_pick_filter",
-                        placeholder="type to filter…",
-                    )
-                    filtered = (
-                        [n for n in pickable if pick_filter.lower() in n.lower()]
-                        if pick_filter
-                        else pickable
-                    )
-                    for name in filtered[:30]:
-                        if st.button(f"+ {name}", key=f"pick_coauthor_{name}"):
-                            p["selected_colleagues"].append(name)
-                            st.rerun()
-                    if len(filtered) > 30:
-                        st.caption(
-                            f"Showing 30 of {len(filtered)} — type more to narrow."
-                        )
+                pick_filter = st.text_input(
+                    "Filter by name",
+                    key="coauthor_pick_filter",
+                    placeholder="type to filter…",
+                )
+                filtered = (
+                    [n for n in pickable if pick_filter.lower() in n.lower()]
+                    if pick_filter
+                    else pickable
+                )
+                for name in filtered[:30]:
+                    if st.button(f"+ {name}", key=f"pick_coauthor_{name}"):
+                        p["selected_colleagues"].append(name)
+                        st.rerun()
+                if len(filtered) > 30:
+                    st.caption(f"Showing 30 of {len(filtered)} — type more to narrow.")
 
             import_label = (
                 "✓ Add this member"
@@ -1741,7 +1936,131 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
                 _commit_preview()
                 st.rerun()
 
-    # ── Continue button (always visible at bottom of Section 1) ──
+    orcid_profile_loaded = st.session_state.pure_scanned or bool(group_members)
+    show_manual_profile_fields = (
+        profile_mode == "group"
+        or orcid_profile_loaded
+        or st.session_state.get("_show_manual_profile_fields", False)
+    )
+
+    if not show_manual_profile_fields:
+        if st.button("No ORCID? Fill manually", key="show_manual_profile_fields_btn"):
+            st.session_state["_show_manual_profile_fields"] = True
+            st.rerun()
+
+    if show_manual_profile_fields:
+        col1, col2 = st.columns(2)
+        with col1:
+            _name_label = "Group / course name" if profile_mode == "group" else "Your name"
+            _name_placeholder = (
+                "AU Exoplanet Group" if profile_mode == "group" else "Jane Smith"
+            )
+            researcher_name = st.text_input(
+                _name_label, placeholder=_name_placeholder, key="profile_name"
+            )
+            institution = st.text_input(
+                "Institution (optional)",
+                placeholder="Aarhus University",
+                key="profile_institution",
+            )
+
+        if ai_assist and st.session_state.research_description and orcid_profile_loaded:
+            st.caption(
+                "Auto-generated from your publications. Edit freely — the AI reads this daily to score papers."
+            )
+        elif profile_mode == "group":
+            st.caption(
+                "Describe your group's interests in 3-5 sentences. More specific = better AI scoring."
+            )
+        else:
+            st.caption(
+                "Describe your research like you'd tell a colleague. More specific = better AI scoring."
+            )
+
+        research_context_widget = st.text_area(
+            "Research context",
+            value=st.session_state._research_description_val,
+            height=120,
+            placeholder="I study exoplanet atmospheres using transmission spectroscopy with JWST and ground-based instruments. I focus on hot Jupiters and sub-Neptunes, particularly their atmospheric composition and cloud properties.",
+            label_visibility="collapsed",
+            key="research_description_widget",
+        )
+        st.session_state.research_description = research_context_widget
+        st.session_state._research_description_val = research_context_widget
+
+        with st.expander("Advanced profile settings"):
+            col1, col2 = st.columns(2)
+            with col1:
+                digest_name = st.text_input(
+                    "Digest name",
+                    value=st.session_state.get("_s2_digest_name", "arXiv Digest"),
+                    help="Appears in the email subject line",
+                )
+                department = st.text_input(
+                    "Department (optional)",
+                    placeholder="Dept. of Physics & Astronomy",
+                    key="profile_department",
+                )
+            with col2:
+                tagline = st.text_input(
+                    "Footer tagline (optional)",
+                    value=st.session_state.get("_s2_tagline", ""),
+                    placeholder="Ad astra per aspera",
+                    help="A quote or motto for the email footer",
+                )
+
+            if profile_mode == "group":
+                st.markdown(
+                    "**Group members on arXiv** — optional. Add author patterns if you want the digest to flag and celebrate papers from anyone in the group."
+                )
+            else:
+                st.markdown(
+                    "**Your name on arXiv** — if you publish a paper, you'll get a special celebration in your digest!"
+                )
+
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                new_self = st.text_input(
+                    "Author match pattern",
+                    placeholder="Smith, J",
+                    key="self_match_input",
+                    label_visibility="collapsed",
+                    help=(
+                        "How a member name appears in arXiv author lists (e.g. 'Smith, J' or 'Jane Smith')"
+                        if profile_mode == "group"
+                        else "How your name appears in arXiv author lists (e.g. 'Smith, J' or 'Jane Smith')"
+                    ),
+                )
+            with col2:
+                if st.button(
+                    "Add pattern" if profile_mode == "group" else "Add",
+                    key="add_self_match",
+                    use_container_width=True,
+                ):
+                    if (
+                        new_self.strip()
+                        and new_self.strip() not in st.session_state.self_match
+                    ):
+                        st.session_state.self_match.append(new_self.strip())
+                        st.rerun()
+
+            if st.session_state.self_match:
+                to_remove = []
+                for pattern in st.session_state.self_match:
+                    col1, col2 = st.columns([4, 1])
+                    with col1:
+                        st.markdown(f"- `{pattern}`")
+                    with col2:
+                        if st.button("✕", key=f"rm_self_{pattern}"):
+                            to_remove.append(pattern)
+                for pattern in to_remove:
+                    st.session_state.self_match.remove(pattern)
+                if to_remove:
+                    st.rerun()
+
+            st.session_state["_s2_digest_name"] = digest_name
+            st.session_state["_s2_tagline"] = tagline
+
     _s1_label = (
         "Skip ORCID — continue to Step 2 →"
         if profile_mode == "group" and not st.session_state.pure_scanned
@@ -1751,196 +2070,84 @@ with st.expander("**1. Your ORCID**", expanded=(st.session_state.current_step ==
         st.session_state.current_step = 2
         st.rerun()
 
-
-# ─────────────────────────────────────────────────────────────
-#  Section 2: Your Profile
-# ─────────────────────────────────────────────────────────────
-
-with st.expander("**2. Your Profile**", expanded=(st.session_state.current_step == 2)):
-    col1, col2 = st.columns(2)
-    with col1:
-        _name_label = "Group / course name" if profile_mode == "group" else "Your name"
-        _name_placeholder = (
-            "AU Exoplanet Group" if profile_mode == "group" else "Jane Smith"
-        )
-        researcher_name = st.text_input(
-            _name_label, placeholder=_name_placeholder, key="profile_name"
-        )
-        institution = st.text_input(
-            "Institution (optional)",
-            placeholder="Aarhus University",
-            key="profile_institution",
-        )
-    with col2:
-        digest_name = st.text_input(
-            "Digest name",
-            value="arXiv Digest",
-            help="Appears in the email subject line",
-        )
-        department = st.text_input(
-            "Department (optional)",
-            placeholder="Dept. of Physics & Astronomy",
-            key="profile_department",
-        )
-
-    tagline = st.text_input(
-        "Footer tagline (optional)",
-        placeholder="Ad astra per aspera",
-        help="A quote or motto for the email footer",
-    )
-
-    # ── Self-match (optional in group mode) ──
-    if profile_mode == "group":
-        st.markdown(
-            "**Group members on arXiv** — optional. Add author patterns if you want the digest to flag and celebrate papers from anyone in the group."
-        )
-    else:
-        st.markdown(
-            "**Your name on arXiv** — if you publish a paper, you'll get a special celebration in your digest!"
-        )
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        new_self = st.text_input(
-            "Author match pattern",
-            placeholder="Smith, J",
-            key="self_match_input",
-            label_visibility="collapsed",
-            help=(
-                "How a member name appears in arXiv author lists (e.g. 'Smith, J' or 'Jane Smith')"
-                if profile_mode == "group"
-                else "How your name appears in arXiv author lists (e.g. 'Smith, J' or 'Jane Smith')"
-            ),
-        )
-    with col2:
-        if st.button(
-            "Add pattern" if profile_mode == "group" else "Add",
-            key="add_self_match",
-            use_container_width=True,
-        ):
-            if new_self.strip() and new_self.strip() not in st.session_state.self_match:
-                st.session_state.self_match.append(new_self.strip())
-                st.rerun()
-
-    if st.session_state.self_match:
-        to_remove = []
-        for pattern in st.session_state.self_match:
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                st.markdown(f"- `{pattern}`")
-            with col2:
-                if st.button("✕", key=f"rm_self_{pattern}"):
-                    to_remove.append(pattern)
-        for p in to_remove:
-            st.session_state.self_match.remove(p)
-            st.rerun()
-
-    if st.button(
-        "Looks good — continue to Step 3 →", key="s2_continue", type="primary"
-    ):
-        st.session_state.current_step = 3
-        st.rerun()
-
-# Persist Section 2 scalar outputs so Section 10 can read them when Section 2 is collapsed
-try:
-    st.session_state["_s2_digest_name"] = digest_name
-    st.session_state["_s2_tagline"] = tagline
-except NameError:
-    pass
-
 researcher_name = st.session_state.get("profile_name", "")
 institution = st.session_state.get("profile_institution", "")
 department = st.session_state.get("profile_department", "")
 digest_name = st.session_state.get("_s2_digest_name", "arXiv Digest")
 tagline = st.session_state.get("_s2_tagline", "")
+research_context = st.session_state.get("research_description", "")
 
 
 # ─────────────────────────────────────────────────────────────
-#  Section 3: Research Description
+#  Step 2: What to Follow
 # ─────────────────────────────────────────────────────────────
 
-with st.expander(
-    "**3. Your Research Description**", expanded=(st.session_state.current_step == 3)
+ai_suggested_set = set(st.session_state.ai_suggested_cats) if ai_assist else set()
+
+if "selected_categories" not in st.session_state:
+    st.session_state.selected_categories = set(ai_suggested_set)
+
+if ai_suggested_set and not st.session_state.selected_categories.issuperset(
+    ai_suggested_set
 ):
-    if ai_assist:
-        if st.session_state.research_description:
-            st.markdown(
-                "Auto-drafted from your publications — edit freely. "
-                "Then hit the button below to suggest categories and score your keywords."
-            )
-        else:
-            if profile_mode == "group":
-                st.markdown(
-                    "Describe your group's interests in 3-5 sentences. "
-                    "We'll use this to **suggest arXiv categories and score keywords** for you."
-                )
-            else:
-                st.markdown(
-                    "Describe your research in 3-5 sentences, like you'd tell a colleague. "
-                    "We'll use this to **suggest arXiv categories and score keywords** for you."
-                )
-    else:
-        st.markdown(
-            "Describe your research in 3-5 sentences. This is what the AI uses to score papers."
-        )
+    st.session_state.selected_categories.update(ai_suggested_set)
 
-    research_context_widget = st.text_area(
-        "Research context",
-        value=st.session_state._research_description_val,
-        height=120,
-        placeholder="I study exoplanet atmospheres using transmission spectroscopy with JWST and ground-based instruments. I focus on hot Jupiters and sub-Neptunes, particularly their atmospheric composition and cloud properties.",
-        label_visibility="collapsed",
-        key="research_description_widget",
+if st.session_state.current_step >= 2:
+    st.markdown(
+        '<p><span class="step-number">2</span> <strong>What to Follow</strong></p>',
+        unsafe_allow_html=True,
     )
-    # Keep backing stores in sync with what the user types
-    st.session_state.research_description = research_context_widget
-    st.session_state._research_description_val = research_context_widget
+    st.markdown("Which arXiv categories to scan, and which topics to look for.")
 
-    # ── Paper selector: choose which publications inform AI keyword/category suggestions ──
     _orcid_titles = st.session_state.get("_orcid_titles", [])
+    _works_meta = st.session_state.get("_orcid_works_meta", [])
+    _paper_context_limit = 30
+
+    def _sort_titles_by_recency(
+        titles: list[str], works_meta: list[dict], cap: int = 10
+    ) -> list[str]:
+        year_map: dict[str, int | None] = {}
+        for entry in works_meta:
+            title = entry.get("title", "")
+            if title:
+                existing = year_map.get(title)
+                year = entry.get("year")
+                if existing is None or (year is not None and year > existing):
+                    year_map[title] = year
+
+        def _sort_key(title: str) -> tuple[int, int]:
+            year = year_map.get(title)
+            return (0, -(year or 0)) if year is not None else (1, 0)
+
+        return sorted(titles, key=_sort_key)[:cap]
+
+    def _run_context_suggestions(context_text: str) -> None:
+        _has_orcid_kws = bool(st.session_state.keywords)
+        _api_available = _ai_available()
+        st.session_state.ai_suggested_cats = suggest_categories(context_text)
+        st.session_state.ai_suggested_kws = suggest_keywords_from_context(
+            context_text,
+            orcid_keywords=st.session_state.keywords if _has_orcid_kws else None,
+        )
+        if _api_available and _has_orcid_kws:
+            ai_lower = {
+                keyword.lower(): weight
+                for keyword, weight in st.session_state.ai_suggested_kws.items()
+            }
+            merged_kws = dict(st.session_state.keywords)
+            for keyword in list(merged_kws.keys()):
+                ai_score = ai_lower.get(keyword.lower())
+                if ai_score is not None:
+                    merged_kws[keyword] = ai_score
+            st.session_state.keywords = merged_kws
+
     if _orcid_titles:
         _total_papers = len(_orcid_titles)
-        _smart_threshold = (
-            10  # use smart pre-selection when user has this many or more papers
-        )
-        _paper_context_limit = 30
-
-        def _sort_titles_by_recency(
-            titles: list[str], works_meta: list[dict], cap: int = 10
-        ) -> list[str]:
-            """
-            Return titles sorted by most recent year, capped to `cap`.
-
-            Priority: most-recent first (year descending, None years last).
-            Author-position data is not available from the ORCID summary endpoint —
-            the fallback is year-descending order, which surfaces recent work reliably.
-            """
-            # Build a year lookup from works_meta; fall back to None when absent
-            year_map: dict[str, int | None] = {}
-            for entry in works_meta:
-                t = entry.get("title", "")
-                if t:
-                    # Keep the most recent year if a title appears more than once
-                    existing = year_map.get(t)
-                    y = entry.get("year")
-                    if existing is None or (y is not None and y > existing):
-                        year_map[t] = y
-
-            # Sort: known years descending first, unknowns at the end (preserve ORCID order)
-            def _sort_key(title: str) -> tuple[int, int]:
-                yr = year_map.get(title)
-                return (0, -(yr or 0)) if yr is not None else (1, 0)
-
-            candidates = sorted(titles, key=_sort_key)
-            return candidates[:cap]
-
-        # Only compute smart default once — when selected_papers is still empty (first render)
-        # or when all current selections are stale (title list changed after a profile reset).
+        _smart_threshold = 10
         _existing = [t for t in st.session_state.selected_papers if t in _orcid_titles]
 
         if not _existing:
-            # First render or stale state: compute the default
             if _total_papers >= _smart_threshold:
-                _works_meta = st.session_state.get("_orcid_works_meta", [])
                 _default_selection = _sort_titles_by_recency(
                     _orcid_titles, _works_meta, cap=_smart_threshold
                 )
@@ -1959,6 +2166,61 @@ with st.expander(
                 st.session_state["paper_selector_widget"] = list(_existing)
 
         st.markdown(
+            f"""
+<div style="background: rgba(212, 175, 55, 0.12); border: 1px solid {GOLD}; border-radius: 8px; padding: 12px 14px; margin: 12px 0;">
+  <strong>Auto-fill from publications</strong><br>
+  <span style="color: {WARM_GREY};">Suggest categories and keywords from your ORCID publications.</span>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f"""
+<div style="background: rgba(212, 175, 55, 0.12); border: 1px solid {GOLD}; border-radius: 8px; padding: 12px 14px; margin: 12px 0;">
+  <strong>Auto-fill from publications</strong><br>
+  <span style="color: {WARM_GREY};">Use your research description to suggest categories and keywords.</span>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
+    _api_available = _ai_available()
+    _cats_already_suggested = bool(st.session_state.ai_suggested_cats)
+    _btn_label = (
+        "Auto-fill from publications"
+        if not _cats_already_suggested
+        else "Re-run auto-fill"
+    )
+    _can_suggest = bool(research_context and len(research_context) > 30)
+    if st.button(
+        _btn_label,
+        key="step2_autofill_btn",
+        type="primary",
+        disabled=not _can_suggest,
+        help="Write a research description in Step 1 first." if not _can_suggest else None,
+    ):
+        with st.spinner("Suggesting categories and scoring keywords..."):
+            _selected_titles = st.session_state.get("selected_papers", [])
+            _effective_titles = _sort_titles_by_recency(
+                _selected_titles, _works_meta, cap=_paper_context_limit
+            )
+            if len(_selected_titles) > _paper_context_limit:
+                st.warning(
+                    f"You selected {len(_selected_titles)} papers. AI will use the {_paper_context_limit} most recent selected papers."
+                )
+            if _effective_titles:
+                _titles_block = "\n".join(f"- {title}" for title in _effective_titles)
+                _ai_context = (
+                    research_context + f"\n\nRepresentative publications:\n{_titles_block}"
+                )
+            else:
+                _ai_context = research_context
+            _run_context_suggestions(_ai_context)
+        st.rerun()
+
+    if _orcid_titles:
+        st.markdown(
             "**Which papers should we use to suggest your keywords?** (select the most representative ones)"
         )
         if _total_papers >= _smart_threshold and _selection_note:
@@ -1973,206 +2235,98 @@ with st.expander(
 
         _current_selection = st.session_state.get("selected_papers", _default_selection)
         _preview_titles = _sort_titles_by_recency(
-            _current_selection, st.session_state.get("_orcid_works_meta", []), cap=5
+            _current_selection, _works_meta, cap=5
         )
 
-        def _render_paper_selector(expanded: bool) -> list[str]:
-            st.markdown(f"**Edit paper selection ({len(st.session_state.get('selected_papers', []))} selected)**")
-            if True:
-                quick_col1, quick_col2, quick_col3, quick_col4 = st.columns(4)
-                with quick_col1:
-                    if st.button("Recent 10", key="paper_recent_10"):
-                        _set_selected_papers(
-                            _sort_titles_by_recency(
-                                _orcid_titles,
-                                st.session_state.get("_orcid_works_meta", []),
-                                cap=10,
-                            )
-                        )
-                        st.rerun()
-                with quick_col2:
-                    if st.button("Recent 30", key="paper_recent_30"):
-                        _set_selected_papers(
-                            _sort_titles_by_recency(
-                                _orcid_titles,
-                                st.session_state.get("_orcid_works_meta", []),
-                                cap=min(30, _total_papers),
-                            )
-                        )
-                        st.rerun()
-                with quick_col3:
-                    if st.button("Select all", key="paper_select_all"):
-                        _set_selected_papers(_orcid_titles)
-                        st.rerun()
-                with quick_col4:
-                    if st.button("Clear", key="paper_clear"):
-                        _set_selected_papers([])
-                        st.rerun()
+        st.caption(
+            f"Currently using {len(_current_selection)} paper"
+            f"{'' if len(_current_selection) == 1 else 's'}."
+        )
+        if _preview_titles:
+            for preview_title in _preview_titles:
+                st.caption(f"• {preview_title}")
 
-                return st.multiselect(
-                    "Papers for keyword suggestions",
-                    options=_orcid_titles,
-                    default=_default_selection,
-                    label_visibility="collapsed",
-                    key="paper_selector_widget",
+        st.markdown(
+            f"**Edit paper selection ({len(st.session_state.get('selected_papers', []))} selected)**"
+        )
+        quick_col1, quick_col2, quick_col3, quick_col4 = st.columns(4)
+        with quick_col1:
+            if st.button("Recent 10", key="paper_recent_10"):
+                _set_selected_papers(
+                    _sort_titles_by_recency(_orcid_titles, _works_meta, cap=10)
                 )
+                st.rerun()
+        with quick_col2:
+            if st.button("Recent 30", key="paper_recent_30"):
+                _set_selected_papers(
+                    _sort_titles_by_recency(
+                        _orcid_titles, _works_meta, cap=min(30, _total_papers)
+                    )
+                )
+                st.rerun()
+        with quick_col3:
+            if st.button("Select all", key="paper_select_all"):
+                _set_selected_papers(_orcid_titles)
+                st.rerun()
+        with quick_col4:
+            if st.button("Clear", key="paper_clear"):
+                _set_selected_papers([])
+                st.rerun()
 
-        if _total_papers >= _smart_threshold:
-            st.caption(
-                f"Currently using {len(_current_selection)} paper"
-                f"{'' if len(_current_selection) == 1 else 's'}."
-            )
-            if _preview_titles:
-                for preview_title in _preview_titles:
-                    st.caption(f"• {preview_title}")
-            _new_selection = _render_paper_selector(expanded=False)
-        else:
-            _new_selection = _render_paper_selector(expanded=True)
-
+        _new_selection = st.multiselect(
+            "Papers for keyword suggestions",
+            options=_orcid_titles,
+            default=_default_selection,
+            label_visibility="collapsed",
+            key="paper_selector_widget",
+        )
         st.session_state.selected_papers = _new_selection
         if len(_new_selection) < _total_papers:
             st.caption(f"{len(_new_selection)} of {_total_papers} papers selected.")
 
-    # ── AI suggestions: auto-run if description was auto-drafted, else show button ──
-    if ai_assist and research_context_widget and len(research_context_widget) > 30:
-        _has_orcid_kws = bool(st.session_state.keywords)
-        _api_available = _ai_available()
-        _cats_already_suggested = bool(st.session_state.ai_suggested_cats)
-
-        # Auto-trigger when profile was imported and description was drafted automatically
-        _auto_trigger = st.session_state.pure_scanned and not _cats_already_suggested
-
-        # Build enriched context: research description + selected paper titles (if any)
+    if (
+        ai_assist
+        and research_context
+        and len(research_context) > 30
+        and st.session_state.pure_scanned
+        and not st.session_state.ai_suggested_cats
+    ):
         _selected_titles = st.session_state.get("selected_papers", [])
-        _works_meta = st.session_state.get("_orcid_works_meta", [])
         _effective_titles = _sort_titles_by_recency(
             _selected_titles, _works_meta, cap=_paper_context_limit
         )
-        if len(_selected_titles) > _paper_context_limit:
-            st.warning(
-                f"You selected {len(_selected_titles)} papers. AI will use the {_paper_context_limit} most recent selected papers."
-            )
         if _effective_titles:
-            _titles_block = "\n".join(f"- {t}" for t in _effective_titles)
+            _titles_block = "\n".join(f"- {title}" for title in _effective_titles)
             _ai_context = (
-                research_context_widget
-                + f"\n\nRepresentative publications:\n{_titles_block}"
+                research_context + f"\n\nRepresentative publications:\n{_titles_block}"
             )
         else:
-            _ai_context = research_context_widget
-
-        if _auto_trigger:
-            with st.spinner("Suggesting categories and scoring keywords..."):
-                st.session_state.ai_suggested_cats = suggest_categories(_ai_context)
-                st.session_state.ai_suggested_kws = suggest_keywords_from_context(
-                    _ai_context,
-                    orcid_keywords=st.session_state.keywords
-                    if _has_orcid_kws
-                    else None,
-                )
-                if _api_available and _has_orcid_kws:
-                    # Merge: keep all existing keywords; update scores where AI returned one.
-                    # Case-insensitive match: build a lowercased lookup from AI results.
-                    ai_lower = {
-                        k.lower(): v
-                        for k, v in st.session_state.ai_suggested_kws.items()
-                    }
-                    merged_kws = dict(st.session_state.keywords)
-                    for kw in list(merged_kws.keys()):
-                        ai_score = ai_lower.get(kw.lower())
-                        if ai_score is not None:
-                            merged_kws[kw] = ai_score
-                    st.session_state.keywords = merged_kws
-            st.rerun()
-        else:
-            _btn_label = (
-                "🤖 Re-score categories & keywords"
-                if _cats_already_suggested
-                else (
-                    "🤖 Suggest categories & score keywords"
-                    if _api_available
-                    else "🤖 Suggest categories & keywords"
-                )
-            )
-            if st.button(
-                _btn_label, type="secondary" if _cats_already_suggested else "primary"
-            ):
-                st.session_state.ai_suggested_cats = suggest_categories(_ai_context)
-                st.session_state.ai_suggested_kws = suggest_keywords_from_context(
-                    _ai_context,
-                    orcid_keywords=st.session_state.keywords
-                    if _has_orcid_kws
-                    else None,
-                )
-                if _api_available and _has_orcid_kws:
-                    # Merge: keep all existing keywords; update scores where AI returned one.
-                    # Case-insensitive match: build a lowercased lookup from AI results.
-                    ai_lower = {
-                        k.lower(): v
-                        for k, v in st.session_state.ai_suggested_kws.items()
-                    }
-                    merged_kws = dict(st.session_state.keywords)
-                    for kw in list(merged_kws.keys()):
-                        ai_score = ai_lower.get(kw.lower())
-                        if ai_score is not None:
-                            merged_kws[kw] = ai_score
-                    st.session_state.keywords = merged_kws
-
-        if st.session_state.ai_suggested_cats:
-            st.success(
-                f"Suggested {len(st.session_state.ai_suggested_cats)} categories and {len(st.session_state.ai_suggested_kws)} keywords — review them below."
-            )
-
-    if st.button(
-        "Looks good — continue to Step 4 →", key="s3_continue", type="primary"
-    ):
-        st.session_state.current_step = 4
+            _ai_context = research_context
+        with st.spinner("Suggesting categories and scoring keywords..."):
+            _run_context_suggestions(_ai_context)
         st.rerun()
 
-# research_context is used in Section 10 config dict — read from backing store
-research_context = st.session_state.get("research_description", "")
+    ai_suggested_set = set(st.session_state.ai_suggested_cats) if ai_assist else set()
+    if ai_suggested_set and not st.session_state.selected_categories.issuperset(
+        ai_suggested_set
+    ):
+        st.session_state.selected_categories.update(ai_suggested_set)
 
-
-# ─────────────────────────────────────────────────────────────
-#  Section 4: arXiv Categories
-# ─────────────────────────────────────────────────────────────
-
-# Build set of AI-suggested categories for pre-selection.
-# Computed outside the expander so categories variable is available for Section 10
-# regardless of whether Section 4 is currently open.
-ai_suggested_set = set(st.session_state.ai_suggested_cats) if ai_assist else set()
-
-# Track which categories the user has selected across all groups
-if "selected_categories" not in st.session_state:
-    st.session_state.selected_categories = set(ai_suggested_set)
-
-# If AI suggestions just arrived, merge them into the selection
-if ai_suggested_set and not st.session_state.selected_categories.issuperset(
-    ai_suggested_set
-):
-    st.session_state.selected_categories.update(ai_suggested_set)
-
-with st.expander(
-    "**4. arXiv Categories**", expanded=(st.session_state.current_step == 4)
-):
     if ai_assist and ai_suggested_set:
         st.success(
-            f"AI suggested {len(ai_suggested_set)} categories based on your research description. "
-            f"They are pre-selected below — review and adjust as needed."
+            f"AI suggested {len(ai_suggested_set)} categories and {len(st.session_state.ai_suggested_kws)} keywords — review them below."
         )
 
-    st.markdown(
-        "Pick the arXiv groups you want to monitor, then choose sub-categories within each group. "
-        "Each group header shows a hint for when to include it."
-    )
+    st.markdown("**arXiv categories**")
+    st.caption("Papers outside these categories are ignored.")
 
-    # ── Group-level hierarchical picker ──
     to_add = set()
     to_remove = set()
-
     for group_name, group_cats in ARXIV_GROUPS.items():
         selected_in_group = [
-            c for c in group_cats if c in st.session_state.selected_categories
+            category
+            for category in group_cats
+            if category in st.session_state.selected_categories
         ]
         n_selected = len(selected_in_group)
         n_total = len(group_cats)
@@ -2188,7 +2342,7 @@ with st.expander(
             if hint:
                 st.caption(f"Include if: {hint}")
 
-            col_all, col_none, col_spacer = st.columns([1, 1, 4])
+            col_all, col_none, _ = st.columns([1, 1, 4])
             with col_all:
                 if st.button(
                     "Select all", key=f"grp_all_{group_name}", use_container_width=True
@@ -2203,7 +2357,6 @@ with st.expander(
             for cat_id in group_cats:
                 label = ARXIV_CATEGORIES.get(cat_id, cat_id)
                 is_selected = cat_id in st.session_state.selected_categories
-                # ✦ marks AI-suggested categories (Unicode, not an emoji)
                 display_label = (
                     f"{label} \u2726" if cat_id in ai_suggested_set else label
                 )
@@ -2219,435 +2372,501 @@ with st.expander(
                 elif not checked and is_selected:
                     to_remove.add(cat_id)
 
-    # Apply batch updates after the loop (avoids mid-loop state mutations)
     if to_add or to_remove:
         st.session_state.selected_categories = (
             st.session_state.selected_categories | to_add
         ) - to_remove
         st.rerun()
 
-    # Summary of selected categories
     _cats_now = sorted(st.session_state.selected_categories)
     if _cats_now:
         st.markdown(
             f"**{len(_cats_now)} categories selected:** "
-            + ", ".join(f"`{c}`" for c in _cats_now)
+            + ", ".join(f"`{category}`" for category in _cats_now)
         )
     else:
         st.info("No categories selected yet. Expand a group above to choose.")
 
-    if st.button(
-        "Looks good — continue to Step 5 →", key="s4_continue", type="primary"
-    ):
-        st.session_state.current_step = 5
-        st.rerun()
-
-# categories must be available outside the expander for the config dict in Section 10
-categories = sorted(st.session_state.selected_categories)
-
-
-# ─────────────────────────────────────────────────────────────
-#  Section 5: Keywords
-# ─────────────────────────────────────────────────────────────
-
-with st.expander("**5. Keywords**", expanded=(st.session_state.current_step == 5)):
-    st.markdown(
-        "Papers matching these keywords get pre-filtered before AI scoring. Higher weight = more important."
-    )
-
-    # If AI suggested keywords, offer to add them
     if ai_assist and st.session_state.ai_suggested_kws:
         new_suggestions = {
-            k: v
-            for k, v in st.session_state.ai_suggested_kws.items()
-            if k not in st.session_state.keywords
+            keyword: weight
+            for keyword, weight in st.session_state.ai_suggested_kws.items()
+            if keyword not in st.session_state.keywords
         }
         if new_suggestions:
             st.markdown("**Suggested keywords** — click to add:")
             cols = st.columns(3)
-            to_add = {}
-            for i, (kw, weight) in enumerate(new_suggestions.items()):
+            to_add_keywords = {}
+            for i, (keyword, weight) in enumerate(new_suggestions.items()):
                 with cols[i % 3]:
                     if st.button(
-                        f"+ {kw} ({weight})",
-                        key=f"add_sug_{kw}",
+                        f"+ {keyword} ({weight})",
+                        key=f"add_sug_{keyword}",
                         use_container_width=True,
                     ):
-                        to_add[kw] = weight
-            if to_add:
-                st.session_state.keywords.update(to_add)
+                        to_add_keywords[keyword] = weight
+            if to_add_keywords:
+                st.session_state.keywords.update(to_add_keywords)
                 st.rerun()
 
-            if st.button("Add all suggested keywords"):
+            if st.button("Add all suggested keywords", key="add_all_suggested_keywords"):
                 st.session_state.keywords.update(new_suggestions)
                 st.rerun()
 
-    # Manual keyword entry
-    st.markdown("**Add keyword manually:**")
-    col1, col2, col3 = st.columns([3, 2, 1])
-    with col1:
-        new_kw = st.text_input(
-            "Keyword",
-            placeholder="transmission spectroscopy",
-            label_visibility="collapsed",
-            key="new_kw_input",
+    st.markdown("**Keywords**")
+    st.caption("Topics your digest looks for. Each gets a default weight of 7.")
+    current_kw_list = [
+        keyword
+        for keyword, _ in sorted(
+            st.session_state.keywords.items(), key=lambda item: (-item[1], item[0].lower())
         )
-    with col2:
-        new_weight = st.slider(
-            "Weight", 1, 10, 7, label_visibility="collapsed", key="new_kw_weight"
-        )
-        st.caption(f"_{_weight_label(new_weight)}_")
-    with col3:
-        if st.button("Add", use_container_width=True, key="add_kw_btn"):
-            if new_kw.strip():
-                st.session_state.keywords[new_kw.strip()] = new_weight
-                st.rerun()
-
-    # Display existing keywords with editable weight sliders
-    if st.session_state.keywords:
-        st.markdown("**Your keywords:**")
-        _kw_col_all, _kw_col_clear, _kw_col_spacer = st.columns([1, 1, 4])
-        with _kw_col_all:
-            if st.button(
-                "Select all",
-                key="kw_select_all",
-                use_container_width=True,
-                help="Set all keyword weights to 10",
-            ):
-                st.session_state.keywords = {k: 10 for k in st.session_state.keywords}
-                st.rerun()
-        with _kw_col_clear:
-            if st.button(
-                "Clear all",
-                key="kw_clear_all",
-                use_container_width=True,
-                help="Set all keyword weights to 1",
-            ):
-                st.session_state.keywords = {k: 1 for k in st.session_state.keywords}
-                st.rerun()
-        to_remove = []
-        for kw, weight in sorted(
-            st.session_state.keywords.items(), key=lambda x: -x[1]
-        ):
-            col1, col2, col3 = st.columns([3, 2, 1])
-            with col1:
-                st.markdown(f"`{kw}`")
-            with col2:
-                new_w = st.slider(
-                    "weight",
-                    1,
-                    10,
-                    weight,
-                    key=f"kw_slider_{kw}",
-                    label_visibility="collapsed",
-                )
-                st.caption(f"_{_weight_label(new_w)}_")
-                # Update weight in-place — no rerun needed, slider state persists
-                st.session_state.keywords[kw] = new_w
-            with col3:
-                if st.button("✕", key=f"rm_kw_{kw}", help=f"Remove {kw}"):
-                    to_remove.append(kw)
-        for kw in to_remove:
-            del st.session_state.keywords[kw]
-            st.rerun()
-    else:
-        st.info(
-            "No keywords yet. Add some above, scan your Pure profile, or use AI suggestions."
-        )
-
-    if st.button(
-        "Looks good — continue to Step 6 →", key="s5_continue", type="primary"
-    ):
-        st.session_state.current_step = 6
-        st.rerun()
-
-
-# ─────────────────────────────────────────────────────────────
-#  Section 6: Research Authors
-# ─────────────────────────────────────────────────────────────
-
-with st.expander(
-    "**6. Research Authors**", expanded=(st.session_state.current_step == 6)
-):
-    if profile_mode == "group":
-        st.markdown(
-            "Papers by these people get a relevance boost. Useful for your lab, reading group, or the researchers your group follows most closely."
-        )
-    else:
-        st.markdown(
-            "Papers by these people get a relevance boost. Use partial name strings (e.g. 'Madhusudhan')."
-        )
-
-    new_author = st.text_input(
-        "Add research author", placeholder="Madhusudhan", key="new_ra_input"
+    ]
+    selected_kws = st.multiselect(
+        "Keywords",
+        options=current_kw_list,
+        default=current_kw_list,
     )
-    if st.button("Add author") and new_author.strip():
-        if new_author.strip() not in st.session_state.research_authors:
-            st.session_state.research_authors.append(new_author.strip())
-            st.rerun()
 
-    if st.session_state.research_authors:
-        to_remove = []
-        for author in st.session_state.research_authors:
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                st.markdown(f"- {author}")
-            with col2:
-                if st.button("✕", key=f"rm_ra_{author}"):
-                    to_remove.append(author)
-        for a in to_remove:
-            st.session_state.research_authors.remove(a)
-            st.rerun()
+    new_keywords = {}
+    for keyword in selected_kws:
+        new_keywords[keyword] = st.session_state.keywords.get(keyword, 7)
+    st.session_state.keywords = new_keywords
 
-    if st.button(
-        "Looks good — continue to Step 7 →", key="s6_continue", type="primary"
-    ):
-        st.session_state.current_step = 7
+    new_kw = st.text_input("Add a keyword", key="new_kw_input")
+    if st.button("Add", key="add_kw_btn") and new_kw.strip():
+        st.session_state.keywords[new_kw.strip()] = 7
         st.rerun()
 
+    with st.expander("Advanced keyword settings"):
+        st.caption(
+            "0-2 loosely follow · 3-5 interested · 6-8 main interest · 9-10 everything"
+        )
+        if st.session_state.keywords:
+            _kw_col_all, _kw_col_clear, _ = st.columns([1, 1, 4])
+            with _kw_col_all:
+                if st.button(
+                    "Select all",
+                    key="kw_select_all",
+                    use_container_width=True,
+                    help="Set all keyword weights to 10",
+                ):
+                    st.session_state.keywords = {
+                        keyword: 10 for keyword in st.session_state.keywords
+                    }
+                    st.rerun()
+            with _kw_col_clear:
+                if st.button(
+                    "Clear all",
+                    key="kw_clear_all",
+                    use_container_width=True,
+                    help="Set all keyword weights to 0",
+                ):
+                    st.session_state.keywords = {
+                        keyword: 0 for keyword in st.session_state.keywords
+                    }
+                    st.rerun()
+
+            to_remove_keywords = []
+            for keyword, weight in sorted(
+                st.session_state.keywords.items(), key=lambda item: (-item[1], item[0].lower())
+            ):
+                col1, col2, col3 = st.columns([3, 2, 1])
+                with col1:
+                    st.markdown(f"`{keyword}`")
+                with col2:
+                    new_weight = st.slider(
+                        "weight",
+                        0,
+                        10,
+                        int(weight),
+                        key=f"kw_slider_{keyword}",
+                        label_visibility="collapsed",
+                    )
+                    st.caption(f"_{_weight_label(new_weight)}_")
+                    st.session_state.keywords[keyword] = new_weight
+                with col3:
+                    if st.button("✕", key=f"rm_kw_{keyword}", help=f"Remove {keyword}"):
+                        to_remove_keywords.append(keyword)
+
+            for keyword in to_remove_keywords:
+                del st.session_state.keywords[keyword]
+            if to_remove_keywords:
+                st.rerun()
+        else:
+            st.info("No keywords yet. Add some above, scan your ORCID, or use AI suggestions.")
+
+    if st.button(
+        "Looks good — continue to Step 3 →", key="s2_continue", type="primary"
+    ):
+        st.session_state.current_step = 3
+        st.rerun()
+
+categories = sorted(st.session_state.selected_categories)
+
 
 # ─────────────────────────────────────────────────────────────
-#  Section 7: Colleagues
+#  Step 3: People to Follow
 # ─────────────────────────────────────────────────────────────
 
-with st.expander("**7. Colleagues**", expanded=(st.session_state.current_step == 7)):
+if st.session_state.current_step >= 3:
     st.markdown(
-        "Papers by colleagues always appear in a special section, even if off-topic. Great for staying social!"
+        '<p><span class="step-number">3</span> <strong>People to Follow</strong></p>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "People whose papers you always want to see. Labmates, advisors, collaborators, researchers you follow."
     )
 
-    st.markdown("**People:**")
+    people_index: dict[str, dict[str, object]] = {}
+    for colleague in st.session_state.colleagues_people:
+        lower_name = colleague.get("name", "").strip().lower()
+        if lower_name:
+            people_index[lower_name] = {
+                "name": colleague["name"],
+                "role": "colleague",
+                "match": colleague.get("match", []),
+            }
+    for author in st.session_state.research_authors:
+        lower_name = author.strip().lower()
+        if lower_name in people_index:
+            people_index[lower_name]["role"] = "colleague + research author"
+        elif lower_name:
+            people_index[lower_name] = {
+                "name": author,
+                "role": "research author",
+                "match": [],
+            }
+
+    all_people = sorted(people_index.values(), key=lambda person: person["name"].lower())
+
     col1, col2 = st.columns([2, 2])
     with col1:
-        new_coll_name = st.text_input(
-            "Colleague name", placeholder="Jane Smith", key="new_coll_name"
+        new_person_name = st.text_input(
+            "Person name", placeholder="Jane Smith", key="new_coll_name"
         )
     with col2:
-        new_coll_match = st.text_input(
-            "Match pattern",
+        new_person_match = st.text_input(
+            "Match pattern (optional)",
             placeholder="Smith, J",
             key="new_coll_match",
-            help="How their name appears in arXiv author lists",
+            help="If blank, we'll derive a standard arXiv match from the name.",
         )
 
-    if st.button("Add colleague") and new_coll_name.strip() and new_coll_match.strip():
-        st.session_state.colleagues_people.append(
-            {
-                "name": new_coll_name.strip(),
-                "match": [new_coll_match.strip()],
-            }
-        )
-        st.rerun()
-
-    if st.session_state.colleagues_people:
-        to_remove = []
-        for i, coll in enumerate(st.session_state.colleagues_people):
-            col1, col2, col3 = st.columns([2, 2, 1])
-            with col1:
-                st.markdown(f"**{coll['name']}**")
-            with col2:
-                st.markdown(f"match: `{', '.join(coll['match'])}`")
-            with col3:
-                if st.button("✕", key=f"rm_coll_{i}"):
-                    to_remove.append(i)
-        for idx in sorted(to_remove, reverse=True):
-            st.session_state.colleagues_people.pop(idx)
-        if to_remove:
+    add_col, clear_col = st.columns([1, 1])
+    with add_col:
+        if st.button("Add person", key="add_person_btn", use_container_width=True):
+            if new_person_name.strip():
+                person_name = new_person_name.strip()
+                if any(
+                    person_name.lower() == colleague.get("name", "").strip().lower()
+                    for colleague in st.session_state.colleagues_people
+                ) or any(
+                    person_name.lower() == author.strip().lower()
+                    for author in st.session_state.research_authors
+                ):
+                    st.info(f"{person_name} is already in your list.")
+                else:
+                    parts = person_name.split()
+                    match_pattern = new_person_match.strip() or (
+                        f"{parts[-1]}, {parts[0][0]}" if len(parts) >= 2 else person_name
+                    )
+                    st.session_state.colleagues_people.append(
+                        {"name": person_name, "match": [match_pattern]}
+                    )
+                    st.rerun()
+    with clear_col:
+        if all_people and st.button(
+            "Clear", key="clear_people_btn", use_container_width=True
+        ):
+            st.session_state.colleagues_people = []
+            st.session_state.research_authors = []
             st.rerun()
 
-    # ── Suggested colleagues — top co-authors from ORCID publications ──
+    if all_people:
+        for person in all_people:
+            col1, col2, col3 = st.columns([3, 2, 1])
+            with col1:
+                st.markdown(f"**{person['name']}**")
+            with col2:
+                role_label = str(person["role"]).replace("_", " ")
+                if person["match"]:
+                    st.caption(f"{role_label} · `{', '.join(person['match'])}`")
+                else:
+                    st.caption(role_label)
+            with col3:
+                if st.button("✕", key=f"rm_person_{person['name']}"):
+                    lower_name = person["name"].strip().lower()
+                    st.session_state.colleagues_people = [
+                        colleague
+                        for colleague in st.session_state.colleagues_people
+                        if colleague.get("name", "").strip().lower() != lower_name
+                    ]
+                    st.session_state.research_authors = [
+                        author
+                        for author in st.session_state.research_authors
+                        if author.strip().lower() != lower_name
+                    ]
+                    st.rerun()
+
     _coauthor_counts = st.session_state.get("_orcid_coauthor_counts", {})
-    if _coauthor_counts:
-        _name_freq = dict(_coauthor_counts)
-        # Remove the user themselves by checking against their profile name
-        _user_name = st.session_state.get("profile_name", "").strip()
-        _user_name_lower = _user_name.lower() if _user_name else ""
+    suggest_col, _ = st.columns([1, 4])
+    with suggest_col:
+        if _coauthor_counts and st.button(
+            "Suggest from co-authors", key="show_coauthor_suggestions", use_container_width=True
+        ):
+            st.session_state["_show_coauthor_suggestions"] = True
+
+    if _coauthor_counts and st.session_state.get("_show_coauthor_suggestions", False):
+        _user_name = st.session_state.get("profile_name", "").strip().lower()
         _group_member_blocklist = _group_member_names()
-        # Exclude names already in colleagues_people
-        _already_tracked = {c["name"] for c in st.session_state.colleagues_people}
+        _already_tracked = {
+            colleague.get("name", "").strip().lower()
+            for colleague in st.session_state.colleagues_people
+        } | {author.strip().lower() for author in st.session_state.research_authors}
         _candidates = [
             (name, count)
             for name, count in sorted(
-                _name_freq.items(), key=lambda item: (-item[1], item[0].lower())
+                _coauthor_counts.items(), key=lambda item: (-item[1], item[0].lower())
             )[:20]
-            if name not in _already_tracked
-            and name.strip()
+            if name.strip()
             and count >= 2
-            and name.lower() != _user_name_lower
-            and name.lower() not in _group_member_blocklist
+            and name.strip().lower() not in _already_tracked
+            and name.strip().lower() != _user_name
+            and name.strip().lower() not in _group_member_blocklist
         ]
-        _top_coauthors = _candidates[:5]
 
-        if len(_top_coauthors) >= 2:
-            st.markdown(
-                "**Suggested colleagues** — based on your most frequent co-authors:"
-            )
-            st.caption("One-click to add them to your People to Track list.")
-            for _ca_name, _ca_count in _top_coauthors:
-                _shared_label = f"{'paper' if _ca_count == 1 else 'papers'}"
-                _col_name, _col_count, _col_btn = st.columns([4, 2, 2])
-                with _col_name:
-                    st.markdown(f"**{_ca_name}**")
-                with _col_count:
-                    st.caption(f"{_ca_count} shared {_shared_label}")
-                with _col_btn:
+        if _candidates:
+            st.markdown("**Co-authors from your publications**")
+            st.caption("Click to add them to the digest.")
+            for coauthor_name, coauthor_count in _candidates[:10]:
+                count_label = "paper" if coauthor_count == 1 else "papers"
+                col_name, col_count, col_btn = st.columns([4, 2, 2])
+                with col_name:
+                    st.markdown(f"**{coauthor_name}**")
+                with col_count:
+                    st.caption(f"{coauthor_count} shared {count_label}")
+                with col_btn:
                     if st.button(
                         "+ Add",
-                        key=f"suggest_coll_{_ca_name}",
+                        key=f"suggest_coll_{coauthor_name}",
                         use_container_width=True,
                     ):
-                        _parts = _ca_name.split()
-                        _match_pat = (
-                            f"{_parts[-1]}, {_parts[0][0]}"
-                            if len(_parts) >= 2
-                            else _ca_name
+                        parts = coauthor_name.split()
+                        match_pattern = (
+                            f"{parts[-1]}, {parts[0][0]}"
+                            if len(parts) >= 2
+                            else coauthor_name
                         )
                         st.session_state.colleagues_people.append(
-                            {
-                                "name": _ca_name,
-                                "match": [_match_pat],
-                            }
+                            {"name": coauthor_name, "match": [match_pattern]}
                         )
                         st.rerun()
 
-    st.markdown("**Institutions** (match against abstract text):")
-    new_inst = st.text_input(
-        "Add institution", placeholder="Aarhus University", key="new_inst_input"
+    st.caption(
+        "Everyone you add gets their own section in the digest, even if their papers are off-topic for you."
     )
-    if st.button("Add institution") and new_inst.strip():
-        if new_inst.strip() not in st.session_state.colleagues_institutions:
-            st.session_state.colleagues_institutions.append(new_inst.strip())
-            st.rerun()
 
-    if st.session_state.colleagues_institutions:
-        to_remove = []
-        for inst in st.session_state.colleagues_institutions:
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                st.markdown(f"- {inst}")
-            with col2:
-                if st.button("✕", key=f"rm_inst_{inst}"):
-                    to_remove.append(inst)
-        for inst in to_remove:
-            st.session_state.colleagues_institutions.remove(inst)
-        if to_remove:
-            st.rerun()
+    with st.expander("Advanced: colleague vs. research author"):
+        st.markdown(
+            "By default, everyone is a colleague (always shown). Reclassify as research author to give a scoring boost instead — they may be filtered if too off-topic."
+        )
+
+        if st.session_state.colleagues_people:
+            st.markdown("**Currently colleagues**")
+            for idx, colleague in enumerate(st.session_state.colleagues_people):
+                col1, col2, col3 = st.columns([3, 2, 2])
+                with col1:
+                    st.markdown(f"**{colleague['name']}**")
+                with col2:
+                    st.caption(f"`{', '.join(colleague.get('match', []))}`")
+                with col3:
+                    if st.button(
+                        "Make research author",
+                        key=f"move_to_author_{idx}",
+                        use_container_width=True,
+                    ):
+                        if colleague["name"] not in st.session_state.research_authors:
+                            st.session_state.research_authors.append(colleague["name"])
+                        st.session_state.colleagues_people.pop(idx)
+                        st.rerun()
+
+        if st.session_state.research_authors:
+            st.markdown("**Currently research authors**")
+            for author in list(st.session_state.research_authors):
+                col1, col2 = st.columns([4, 2])
+                with col1:
+                    st.markdown(f"**{author}**")
+                with col2:
+                    if st.button(
+                        "Move to colleagues",
+                        key=f"move_to_colleague_{author}",
+                        use_container_width=True,
+                    ):
+                        st.session_state.research_authors = [
+                            existing
+                            for existing in st.session_state.research_authors
+                            if existing != author
+                        ]
+                        if not any(
+                            colleague.get("name", "").strip().lower()
+                            == author.strip().lower()
+                            for colleague in st.session_state.colleagues_people
+                        ):
+                            parts = author.split()
+                            match_pattern = (
+                                f"{parts[-1]}, {parts[0][0]}"
+                                if len(parts) >= 2
+                                else author
+                            )
+                            st.session_state.colleagues_people.append(
+                                {"name": author, "match": [match_pattern]}
+                            )
+                        st.rerun()
+
+        st.markdown("**Institutions** (match against abstract text):")
+        new_inst = st.text_input(
+            "Add institution", placeholder="Aarhus University", key="new_inst_input"
+        )
+        if st.button("Add institution", key="add_institution_btn") and new_inst.strip():
+            if new_inst.strip() not in st.session_state.colleagues_institutions:
+                st.session_state.colleagues_institutions.append(new_inst.strip())
+                st.rerun()
+
+        if st.session_state.colleagues_institutions:
+            to_remove = []
+            for inst in st.session_state.colleagues_institutions:
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    st.markdown(f"- {inst}")
+                with col2:
+                    if st.button("✕", key=f"rm_inst_{inst}"):
+                        to_remove.append(inst)
+            for inst in to_remove:
+                st.session_state.colleagues_institutions.remove(inst)
+            if to_remove:
+                st.rerun()
 
     if st.button(
-        "Looks good — continue to Step 8 →", key="s7_continue", type="primary"
+        "Looks good — continue to Step 4 →", key="s3_continue", type="primary"
     ):
-        st.session_state.current_step = 8
+        st.session_state.current_step = 4
         st.rerun()
 
 
 # ─────────────────────────────────────────────────────────────
-#  Section 8: Digest Mode & Schedule
+#  Step 4: Delivery & Download
 # ─────────────────────────────────────────────────────────────
 
-with st.expander(
-    "**8. Digest Mode & Schedule**", expanded=(st.session_state.current_step == 8)
-):
-    # ── Digest mode ──
-    st.markdown("**How much do you want to read?**")
+if st.session_state.current_step >= 4:
+    st.markdown(
+        '<p><span class="step-number">4</span> <strong>Delivery & Download</strong></p>',
+        unsafe_allow_html=True,
+    )
+    st.markdown("How your digest is delivered. Most people can just download here.")
+
+    digest_mode = st.session_state.get("_s8_digest_mode", "highlights")
+    schedule = st.session_state.get("_s8_schedule", "mon_wed_fri")
+    if schedule == "daily":
+        schedule = "weekdays"
+
+    schedule_options = {
+        "mon_wed_fri": "Mon / Wed / Fri",
+        "weekdays": "Every weekday",
+        "weekly": "Weekly (Monday)",
+    }
+    schedule_summary = {
+        "mon_wed_fri": "Mon, Wed, Fri",
+        "weekdays": "every weekday",
+        "weekly": "Monday",
+    }
+
+    st.markdown("**Schedule**")
+    schedule_col, change_col = st.columns([5, 1])
+    schedule_summary_slot = schedule_col.empty()
+    with schedule_col:
+        pass
+    with change_col:
+        if st.button("Change →", key="toggle_schedule_picker", use_container_width=True):
+            st.session_state["_show_schedule_picker"] = not st.session_state.get(
+                "_show_schedule_picker", False
+            )
+
+    if st.session_state.get("_show_schedule_picker", False):
+        schedule = st.radio(
+            "Frequency",
+            options=list(schedule_options.keys()),
+            index=list(schedule_options.keys()).index(schedule),
+            format_func=lambda value: {
+                "mon_wed_fri": "Mon / Wed / Fri — Best balance",
+                "weekdays": "Every weekday — Never miss a day",
+                "weekly": "Weekly — Monday round-up",
+            }[value],
+            label_visibility="collapsed",
+        )
+
+    schedule_summary_slot.markdown(
+        f"Your digest arrives **{schedule_summary.get(schedule, schedule)}**."
+    )
+
+    st.markdown("**Digest size**")
     digest_mode = st.radio(
         "Digest mode",
         options=["highlights", "in_depth"],
-        format_func=lambda x: {
-            "highlights": "🎯 Highlights — just the top papers (fewer, higher quality)",
-            "in_depth": "📚 In-depth — wider net, more papers to browse",
-        }[x],
-        horizontal=True,
+        index=0 if digest_mode == "highlights" else 1,
+        format_func=lambda value: {
+            "highlights": "Highlights — Top papers only (up to 6). For busy people.",
+            "in_depth": "In-depth — Wider net (up to 15). For browsers.",
+        }[value],
         label_visibility="collapsed",
     )
 
-    # Show what the mode means
-    if digest_mode == "highlights":
+    with st.expander("Customize card layout"):
+        current_view = st.session_state.get("_s8_recipient_view_mode", "deep_read")
+        recipient_view_mode = st.radio(
+            "Card layout",
+            options=["deep_read", "5_min_skim"],
+            index=0 if current_view == "deep_read" else 1,
+            format_func=lambda value: {
+                "deep_read": "Deep read — full cards with expanded context",
+                "5_min_skim": "Skim — top 3 papers, one-line summaries",
+            }[value],
+            label_visibility="collapsed",
+        )
+        st.caption("Card element reordering is not configurable in this build.")
+
+    with st.expander("Self-hosting options"):
         st.caption(
-            "Default: up to 6 papers, min score 5/10. Only the most relevant papers make it through."
-        )
-    else:
-        st.caption(
-            "Default: up to 15 papers, min score 2/10. Casts a wider net — great for staying broadly informed."
+            "Only relevant if you're running your own email. Most users can skip this."
         )
 
-    st.markdown("**Recipient email view**")
-    recipient_view_mode = st.radio(
-        "Recipient email view",
-        options=["deep_read", "5_min_skim"],
-        format_func=lambda x: {
-            "deep_read": "📖 Deep read — full cards with expanded context",
-            "5_min_skim": "⚡ 5-minute skim — top 3 papers, one-line summaries",
-        }[x],
-        horizontal=True,
-        label_visibility="collapsed",
-    )
+        smtp_options = {
+            "Gmail": ("smtp.gmail.com", 587),
+            "Outlook / Office 365": ("smtp.office365.com", 587),
+        }
+        current_smtp_server = st.session_state.get("_s9_smtp_server", "smtp.gmail.com")
+        current_smtp_choice = (
+            "Outlook / Office 365"
+            if current_smtp_server == "smtp.office365.com"
+            else "Gmail"
+        )
+        smtp_choice = st.radio(
+            "SMTP provider",
+            options=list(smtp_options.keys()),
+            index=list(smtp_options.keys()).index(current_smtp_choice),
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+        smtp_server, smtp_port = smtp_options[smtp_choice]
 
-    # ── Advanced overrides ──
-    mode_defaults = {"highlights": (6, 5), "in_depth": (15, 2)}
-    default_max, default_min = mode_defaults[digest_mode]
-    override_max = False
-    override_min = False
-
-    st.markdown("**Fine-tune (optional)**")
-    if True:
-        col1, col2 = st.columns(2)
-        with col1:
-            max_papers = st.number_input(
-                "Max papers per digest", min_value=1, max_value=30, value=default_max
-            )
-        with col2:
-            min_score = st.number_input(
-                "Min relevance score (1-10)",
-                min_value=1,
-                max_value=10,
-                value=default_min,
-            )
-
-        override_max = max_papers != default_max
-        override_min = min_score != default_min
-
-    st.markdown("---")
-
-    # ── Schedule ──
-    st.markdown("**How often should the digest arrive?**")
-    schedule_options = {
-        "mon_wed_fri": "Mon / Wed / Fri",
-        "daily": "Every weekday (Mon–Fri)",
-        "weekly": "Once a week (Monday)",
-    }
-    schedule = st.radio(
-        "Frequency",
-        options=list(schedule_options.keys()),
-        format_func=lambda x: schedule_options[x],
-        horizontal=True,
-        label_visibility="collapsed",
-    )
-
-    # ── Days back (auto-set based on schedule, with override) ──
-    schedule_days_back = {"daily": 2, "mon_wed_fri": 4, "weekly": 8}
-    days_back = schedule_days_back[schedule]
-
-    override_days = st.checkbox("Override days back", value=False, key="override_days_back")
-    if override_days:
-        days_back = st.number_input(
-            "Days to look back", min_value=1, max_value=14, value=days_back
+        send_hour_utc = st.slider(
+            "Send hour (UTC)",
+            min_value=0,
+            max_value=23,
+            value=int(st.session_state.get("_s8_send_hour_utc", 7)),
+            help="Default is 7 UTC = 9am Danish time (CET). Adjust for your timezone.",
         )
 
-    st.caption(f"Will look back **{days_back} days** for new papers.")
-
-    # ── Send time ──
-    st.markdown("**What time should it arrive?** (UTC)")
-    send_hour_utc = st.slider(
-        "Send hour (UTC)",
-        min_value=0,
-        max_value=23,
-        value=7,
-        help="Default is 7 UTC = 9am Danish time (CET). Adjust for your timezone.",
-        label_visibility="collapsed",
-    )
-
-    # Show common timezone equivalents
-    tz_examples = []
-    if 0 <= send_hour_utc <= 23:
+        tz_examples = []
         cet = (send_hour_utc + 1) % 24
         cest = (send_hour_utc + 2) % 24
         est = (send_hour_utc - 5) % 24
@@ -2658,17 +2877,65 @@ with st.expander(
             f"EST: {est}:00",
             f"PST: {pst}:00",
         ]
-    st.caption(" · ".join(tz_examples))
+        st.caption(" · ".join(tz_examples))
 
-    # ── Generate cron expression ──
-    CRON_MAP = {
-        "daily": f"0 {send_hour_utc} * * 1-5",
+        mode_defaults = {"highlights": (6, 5), "in_depth": (15, 2)}
+        default_max, default_min = mode_defaults[digest_mode]
+        max_papers = st.number_input(
+            "Max papers per digest",
+            min_value=1,
+            max_value=30,
+            value=int(
+                st.session_state.get("_s8_max_papers", default_max)
+                if st.session_state.get("_s8_override_max", False)
+                else default_max
+            ),
+            key=f"max_papers_input_{digest_mode}",
+        )
+        min_score = st.number_input(
+            "Min relevance score (1-10)",
+            min_value=1,
+            max_value=10,
+            value=int(
+                st.session_state.get("_s8_min_score", default_min)
+                if st.session_state.get("_s8_override_min", False)
+                else default_min
+            ),
+            key=f"min_score_input_{digest_mode}",
+        )
+        override_max = max_papers != default_max
+        override_min = min_score != default_min
+
+        github_repo = st.text_input(
+            "GitHub repo (optional)",
+            value=st.session_state.get("_s9_github_repo", ""),
+            placeholder="username/arxiv-digest",
+            help="Enables self-service links in emails",
+        )
+
+    if "recipient_view_mode" not in locals():
+        recipient_view_mode = st.session_state.get("_s8_recipient_view_mode", "deep_read")
+    if "smtp_server" not in locals():
+        smtp_server = st.session_state.get("_s9_smtp_server", "smtp.gmail.com")
+        smtp_port = st.session_state.get("_s9_smtp_port", 587)
+        github_repo = st.session_state.get("_s9_github_repo", "")
+        send_hour_utc = int(st.session_state.get("_s8_send_hour_utc", 7))
+        mode_defaults = {"highlights": (6, 5), "in_depth": (15, 2)}
+        default_max, default_min = mode_defaults[digest_mode]
+        max_papers = int(st.session_state.get("_s8_max_papers", default_max))
+        min_score = int(st.session_state.get("_s8_min_score", default_min))
+        override_max = bool(st.session_state.get("_s8_override_max", False))
+        override_min = bool(st.session_state.get("_s8_override_min", False))
+
+    schedule_days_back = {"mon_wed_fri": 4, "weekdays": 2, "weekly": 7}
+    cron_map = {
         "mon_wed_fri": f"0 {send_hour_utc} * * 1,3,5",
+        "weekdays": f"0 {send_hour_utc} * * 1-5",
         "weekly": f"0 {send_hour_utc} * * 1",
     }
-    cron_expr = CRON_MAP[schedule]
+    days_back = schedule_days_back[schedule]
+    cron_expr = cron_map[schedule]
 
-    # Persist so Section 10 can read these when Section 8 is collapsed
     st.session_state["_s8_digest_mode"] = digest_mode
     st.session_state["_s8_schedule"] = schedule
     st.session_state["_s8_schedule_options"] = schedule_options
@@ -2680,89 +2947,12 @@ with st.expander(
     st.session_state["_s8_max_papers"] = max_papers
     st.session_state["_s8_min_score"] = min_score
     st.session_state["_s8_recipient_view_mode"] = recipient_view_mode
-
-    if st.button(
-        "Looks good — continue to Step 9 →", key="s8_continue", type="primary"
-    ):
-        st.session_state.current_step = 9
-        st.rerun()
-
-# Read Section 8 outputs — valid whether the expander is open or collapsed
-digest_mode = st.session_state.get("_s8_digest_mode", "highlights")
-schedule = st.session_state.get("_s8_schedule", "mon_wed_fri")
-schedule_options = st.session_state.get(
-    "_s8_schedule_options",
-    {
-        "mon_wed_fri": "Mon / Wed / Fri",
-        "daily": "Every weekday (Mon–Fri)",
-        "weekly": "Once a week (Monday)",
-    },
-)
-send_hour_utc = st.session_state.get("_s8_send_hour_utc", 7)
-days_back = st.session_state.get("_s8_days_back", 4)
-cron_expr = st.session_state.get("_s8_cron_expr", f"0 7 * * 1,3,5")
-override_max = st.session_state.get("_s8_override_max", False)
-override_min = st.session_state.get("_s8_override_min", False)
-_def_max, _def_min = {"highlights": (6, 5), "in_depth": (15, 2)}.get(
-    digest_mode, (6, 5)
-)
-max_papers = st.session_state.get("_s8_max_papers", _def_max)
-min_score_val = st.session_state.get("_s8_min_score", _def_min)
-recipient_view_mode = st.session_state.get("_s8_recipient_view_mode", "deep_read")
-
-
-# ─────────────────────────────────────────────────────────────
-#  Section 9: Email Provider
-# ─────────────────────────────────────────────────────────────
-
-with st.expander(
-    "**9. Email Provider**", expanded=(st.session_state.current_step == 9)
-):
-    smtp_options = {
-        "Gmail": ("smtp.gmail.com", 587),
-        "Outlook / Office 365": ("smtp.office365.com", 587),
-    }
-    smtp_choice = st.radio(
-        "SMTP provider",
-        options=list(smtp_options.keys()),
-        horizontal=True,
-        label_visibility="collapsed",
-    )
-    smtp_server, smtp_port = smtp_options[smtp_choice]
-
-    github_repo = st.text_input(
-        "GitHub repo (optional)",
-        placeholder="username/arxiv-digest",
-        help="Enables self-service links in emails",
-    )
-
-    # Persist so Section 10 can read when Section 9 is collapsed
     st.session_state["_s9_smtp_server"] = smtp_server
     st.session_state["_s9_smtp_port"] = smtp_port
     st.session_state["_s9_github_repo"] = github_repo
 
-    if st.button(
-        "Looks good — continue to Step 10 →", key="s9_continue", type="primary"
-    ):
-        st.session_state.current_step = 10
-        st.rerun()
-
-# Read Section 9 outputs — valid whether open or collapsed
-smtp_server = st.session_state.get("_s9_smtp_server", "smtp.gmail.com")
-smtp_port = st.session_state.get("_s9_smtp_port", 587)
-github_repo = st.session_state.get("_s9_github_repo", "")
-
-
-# ─────────────────────────────────────────────────────────────
-#  Section 10: Preview & Download
-# ─────────────────────────────────────────────────────────────
-
-with st.expander(
-    "**10. Preview & Download**", expanded=(st.session_state.current_step == 10)
-):
     st.markdown("### Your config.yaml is ready")
 
-    # Build config dict
     config = {
         "digest_name": digest_name or "arXiv Digest",
         "researcher_name": researcher_name
@@ -2799,11 +2989,10 @@ with st.expander(
         "github_repo": github_repo or "",
     }
 
-    # Only include overrides if user changed them from mode defaults
     if override_max:
         config["max_papers"] = max_papers
     if override_min:
-        config["min_score"] = min_score_val
+        config["min_score"] = min_score
     if profile_mode == "group" and st.session_state.get("group_orcid_members"):
         config["group_members"] = [
             {
@@ -2819,7 +3008,6 @@ with st.expander(
     )
 
     tab1, tab2 = st.tabs(["config.yaml", "Workflow cron"])
-
     with tab1:
         st.code(config_yaml, language="yaml")
 
@@ -2850,6 +3038,47 @@ with st.expander(
         if st.button("📋 Show YAML", use_container_width=True):
             st.code(config_yaml, language="yaml")
             st.info("Select all text above and copy with Ctrl+C (Cmd+C on Mac)")
+
+digest_mode = st.session_state.get("_s8_digest_mode", "highlights")
+schedule = st.session_state.get("_s8_schedule", "mon_wed_fri")
+if schedule == "daily":
+    schedule = "weekdays"
+schedule_options = st.session_state.get(
+    "_s8_schedule_options",
+    {
+        "mon_wed_fri": "Mon / Wed / Fri",
+        "weekdays": "Every weekday",
+        "weekly": "Weekly (Monday)",
+    },
+)
+if "daily" in schedule_options and "weekdays" not in schedule_options:
+    schedule_options = {
+        ("weekdays" if key == "daily" else key): value
+        for key, value in schedule_options.items()
+    }
+send_hour_utc = st.session_state.get("_s8_send_hour_utc", 7)
+days_back = st.session_state.get(
+    "_s8_days_back", {"mon_wed_fri": 4, "weekdays": 2, "weekly": 7}[schedule]
+)
+cron_expr = st.session_state.get(
+    "_s8_cron_expr",
+    {
+        "mon_wed_fri": f"0 {send_hour_utc} * * 1,3,5",
+        "weekdays": f"0 {send_hour_utc} * * 1-5",
+        "weekly": f"0 {send_hour_utc} * * 1",
+    }[schedule],
+)
+override_max = st.session_state.get("_s8_override_max", False)
+override_min = st.session_state.get("_s8_override_min", False)
+_def_max, _def_min = {"highlights": (6, 5), "in_depth": (15, 2)}.get(
+    digest_mode, (6, 5)
+)
+max_papers = st.session_state.get("_s8_max_papers", _def_max)
+min_score_val = st.session_state.get("_s8_min_score", _def_min)
+recipient_view_mode = st.session_state.get("_s8_recipient_view_mode", "deep_read")
+smtp_server = st.session_state.get("_s9_smtp_server", "smtp.gmail.com")
+smtp_port = st.session_state.get("_s9_smtp_port", 587)
+github_repo = st.session_state.get("_s9_github_repo", "")
 
 
 # ─────────────────────────────────────────────────────────────
