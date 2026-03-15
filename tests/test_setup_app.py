@@ -1,7 +1,13 @@
-from pathlib import Path
-import tomllib
+import pytest
 
-from streamlit.testing.v1 import AppTest
+from pathlib import Path
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python <3.11 fallback for local dev
+    import tomli as tomllib
+
+streamlit_testing = pytest.importorskip("streamlit.testing.v1")
+AppTest = streamlit_testing.AppTest
 
 
 ROOT = Path(__file__).resolve().parents[1]
