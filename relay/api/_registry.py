@@ -21,12 +21,19 @@ AU_STUDENT_TRACK_LABELS = {
     "galaxies": "Galaxies",
     "cosmology": "Cosmology",
     "exoplanets": "Planets + exoplanets",
+    "high_energy": "High-energy astrophysics",
+    "instrumentation": "Instrumentation",
+    "solar_helio": "Solar & heliophysics",
+    "methods_ml": "Methods & machine learning",
 }
 
 DEFAULT_MAX_PAPERS = 6
 MIN_MAX_PAPERS = 1
 MAX_MAX_PAPERS = 20
-AVAILABLE_STUDENT_PACKAGES = ["exoplanets", "stars", "galaxies", "cosmology"]
+AVAILABLE_STUDENT_PACKAGES = [
+    "exoplanets", "stars", "galaxies", "cosmology",
+    "high_energy", "instrumentation", "solar_helio", "methods_ml",
+]
 
 
 def now_iso() -> str:

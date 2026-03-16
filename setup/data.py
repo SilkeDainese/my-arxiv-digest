@@ -106,6 +106,32 @@ ASTRO_MINI_TRACKS = {
             "calibration": 5,
         },
     },
+    "solar_helio": {
+        "label": "Solar & heliophysics",
+        "blurb": "Solar physics, space weather, heliosphere, and asteroseismology.",
+        "categories": ["astro-ph.SR"],
+        "keywords": {
+            "solar": 9,
+            "heliosphere": 8,
+            "space weather": 7,
+            "coronal": 6,
+            "solar wind": 6,
+            "sunspot": 5,
+        },
+    },
+    "methods_ml": {
+        "label": "Methods & machine learning",
+        "blurb": "Statistical methods, machine learning, and data science for astronomy.",
+        "categories": ["astro-ph.IM", "stat.ML"],
+        "keywords": {
+            "machine learning": 9,
+            "neural network": 8,
+            "Bayesian": 7,
+            "classification": 6,
+            "deep learning": 6,
+            "data science": 5,
+        },
+    },
 }
 
 AU_STUDENT_TRACK_LABELS = {
@@ -114,6 +140,10 @@ AU_STUDENT_TRACK_LABELS = {
     "galaxies": "Galaxies",
     "cosmology": "Cosmology",
     "exoplanets": "Planets + exoplanets",
+    "high_energy": "High-energy astrophysics",
+    "instrumentation": "Instrumentation",
+    "solar_helio": "Solar & heliophysics",
+    "methods_ml": "Methods & machine learning",
 }
 AU_STUDENT_ALWAYS_TAG = "AU Astronomy"
 
