@@ -20,8 +20,8 @@ I built this during my PhD in astronomy at Aarhus University to stay on top of n
 ## Quick Start
 1. **[Open the config page →](https://arxiv-digest-setup.streamlit.app)** — it walks you through everything, including secrets. Download `config.yaml` when done.
 2. **[Fork this repo →](https://github.com/SilkeDainese/arxiv-digest/fork)** and upload `config.yaml` to the repo root.
-3. Add the <a href="https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions" title="Secrets are private values (like passwords or tokens) stored in your repo settings — GitHub keeps them hidden from your code and logs">secrets</a> the config page told you to add.
-4. Run it: <a href="https://docs.github.com/en/actions/learn-github-actions/understanding-github-actions" title="Actions is GitHub's built-in automation — it runs your digest on a schedule without you doing anything">Actions</a> → enable workflows → `arXiv Digest` → `Run workflow`
+3. Add the <a href="https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions" title="Secrets are GitHub's way of storing passwords and access codes safely — only your repo can see them, they stay hidden from everyone else">secrets</a> the config page told you to add.
+4. Run it: <a href="https://docs.github.com/en/actions/learn-github-actions/understanding-github-actions" title="Actions is GitHub's built-in automation — it runs your digest on a schedule, like a timer you set once and forget">Actions</a> → enable workflows → `arXiv Digest` → `Run workflow`
 
 > **That's it.** *Runs automatically Mon/Wed/Fri at 9am Danish time.*
 
@@ -82,7 +82,7 @@ Outlook users: also set `smtp_server: "smtp.office365.com"` in [`config.yaml`](c
 <details>
 <summary>Do I need an API key?</summary>
 
-No. Keyword scoring works without any key. AI keys make the ranking smarter — add one later from [Google AI Studio](https://aistudio.google.com/apikey) (free) or [Anthropic Console](https://console.anthropic.com/). Add it as a repo secret, same way you added your other secrets.
+No. An API key is like a password that lets your digest talk to an AI service (Google or Anthropic) to rank papers more intelligently. Keyword scoring works fine without one. If you want smarter ranking later, get a free key from [Google AI Studio](https://aistudio.google.com/apikey) or [Anthropic Console](https://console.anthropic.com/) and add it as a repo secret.
 
 </details>
 
