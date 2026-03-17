@@ -7,6 +7,7 @@ import copy
 import json
 import os
 import re
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -264,7 +265,20 @@ def main(argv: list[str] | None = None) -> int:
     print("=" * 50)
 
     base_config = build_student_base_config()
-    subscriptions = fetch_student_subscriptions()
+    try:
+        subscriptions = fetch_student_subscriptions()
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            print(f"\n❌ Student registry auth failed (HTTP {exc.code}). Check STUDENT_ADMIN_TOKEN.")
+        else:
+            print(f"\n❌ Student registry returned HTTP {exc.code}.")
+        return 1
+    except urllib.error.URLError as exc:
+        print(f"\n❌ Could not reach student registry: {exc.reason}")
+        return 1
+    except RuntimeError as exc:
+        print(f"\n❌ {exc}")
+        return 1
     active_subscriptions = [item for item in subscriptions if item.get("active", True)]
     if args.recipient:
         target = normalise_email(args.recipient)
@@ -315,39 +329,44 @@ def main(argv: list[str] | None = None) -> int:
     skipped_count = 0
     failed_recipients: list[str] = []
     for subscription in active_subscriptions:
-        selected = select_student_papers(
-            ranked_papers,
-            list(subscription["package_ids"]),
-            int(subscription["max_papers_per_week"]),
-        )
-        if not selected:
-            print(f"   ↷ No matching papers for {subscription['email']} — skipping")
-            skipped_count += 1
-            continue
-
-        student_config = make_student_digest_config(base_config, subscription)
-        html = render_html(
-            selected,
-            [],
-            student_config,
-            date_str,
-            own_papers=[],
-            scoring_method=scoring_method,
-        )
-        summary = (
-            f"{subscription['email']} "
-            f"({len(selected)} papers, packages: {', '.join(subscription['package_ids'])})"
-        )
-        if preview_dir is not None:
-            preview_path = preview_dir / _preview_filename(subscription["email"])
-            preview_path.write_text(html, encoding="utf-8")
-            print(f"\n📝 Wrote preview for {summary} -> {preview_path}")
-        else:
-            print(f"\n📧 Sending student digest to {summary}")
-            if not send_email(html, len(selected), date_str, student_config, papers=selected):
-                failed_recipients.append(subscription["email"])
+        try:
+            selected = select_student_papers(
+                ranked_papers,
+                list(subscription["package_ids"]),
+                int(subscription["max_papers_per_week"]),
+            )
+            if not selected:
+                print(f"   ↷ No matching papers for {subscription['email']} — skipping")
+                skipped_count += 1
                 continue
-        processed_count += 1
+
+            student_config = make_student_digest_config(base_config, subscription)
+            html = render_html(
+                selected,
+                [],
+                student_config,
+                date_str,
+                own_papers=[],
+                scoring_method=scoring_method,
+            )
+            summary = (
+                f"{subscription['email']} "
+                f"({len(selected)} papers, packages: {', '.join(subscription['package_ids'])})"
+            )
+            if preview_dir is not None:
+                preview_path = preview_dir / _preview_filename(subscription["email"])
+                preview_path.write_text(html, encoding="utf-8")
+                print(f"\n📝 Wrote preview for {summary} -> {preview_path}")
+            else:
+                print(f"\n📧 Sending student digest to {summary}")
+                if not send_email(html, len(selected), date_str, student_config, papers=selected):
+                    failed_recipients.append(subscription["email"])
+                    continue
+            processed_count += 1
+        except Exception as exc:
+            print(f"   ❌ Unexpected error for {subscription['email']}: {exc}")
+            failed_recipients.append(subscription["email"])
+            continue
 
     if preview_dir is not None:
         print(f"\n✨ Wrote {processed_count} student preview(s), skipped {skipped_count}.\n")

@@ -1,3 +1,5 @@
+import urllib.error
+
 import student_digest as sd
 from digest import _render_footer
 from setup.student_presets import (
@@ -356,3 +358,102 @@ def test_student_digest_continues_after_send_failure(monkeypatch):
 
     assert exit_code == 1
     assert attempts == ["first@example.com", "second@example.com"]
+
+
+def test_student_digest_exits_on_registry_auth_error(monkeypatch):
+    """HTTP 401 from the student registry should exit with code 1 and a clear message."""
+    def raise_401():
+        raise urllib.error.HTTPError(
+            url="https://example.com/api/students",
+            code=401,
+            msg="Unauthorized",
+            hdrs={},
+            fp=None,
+        )
+
+    monkeypatch.setattr(sd, "fetch_student_subscriptions", raise_401)
+    exit_code = sd.main([])
+    assert exit_code == 1
+
+
+def test_student_digest_exits_on_registry_forbidden(monkeypatch):
+    """HTTP 403 from the student registry should exit with code 1."""
+    def raise_403():
+        raise urllib.error.HTTPError(
+            url="https://example.com/api/students",
+            code=403,
+            msg="Forbidden",
+            hdrs={},
+            fp=None,
+        )
+
+    monkeypatch.setattr(sd, "fetch_student_subscriptions", raise_403)
+    exit_code = sd.main([])
+    assert exit_code == 1
+
+
+def test_student_digest_exits_on_registry_network_error(monkeypatch):
+    """URLError (network failure) should exit with code 1."""
+    def raise_url_error():
+        raise urllib.error.URLError("Connection refused")
+
+    monkeypatch.setattr(sd, "fetch_student_subscriptions", raise_url_error)
+    exit_code = sd.main([])
+    assert exit_code == 1
+
+
+def test_student_digest_exits_on_missing_admin_token(monkeypatch):
+    """RuntimeError from missing STUDENT_ADMIN_TOKEN should exit with code 1."""
+    def raise_runtime():
+        raise RuntimeError("STUDENT_ADMIN_TOKEN is required for student digests.")
+
+    monkeypatch.setattr(sd, "fetch_student_subscriptions", raise_runtime)
+    exit_code = sd.main([])
+    assert exit_code == 1
+
+
+def test_student_digest_continues_after_unexpected_per_student_error(monkeypatch):
+    """An unexpected error for one student should not crash the batch."""
+    subscriptions = [
+        {
+            "email": "crash@example.com",
+            "package_ids": ["exoplanets"],
+            "max_papers_per_week": 2,
+            "active": True,
+        },
+        {
+            "email": "ok@example.com",
+            "package_ids": ["exoplanets"],
+            "max_papers_per_week": 2,
+            "active": True,
+        },
+    ]
+    papers = [
+        make_paper(id="p1", matched_keywords=["exoplanet"], relevance_score=8)
+    ]
+    sent = []
+    call_count = [0]
+
+    monkeypatch.setattr(sd, "fetch_student_subscriptions", lambda: subscriptions)
+    monkeypatch.setattr(sd, "fetch_arxiv_papers", lambda config: papers)
+    monkeypatch.setattr(sd, "ingest_feedback_from_github", lambda config: {})
+    monkeypatch.setattr(sd, "apply_feedback_bias", lambda papers, feedback_stats: None)
+    monkeypatch.setattr(sd, "pre_filter", lambda papers: papers)
+    monkeypatch.setattr(sd, "analyse_papers", lambda papers, config: (papers, "keywords"))
+
+    def fake_render(papers, colleague_papers, config, date_str, own_papers, scoring_method):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            raise KeyError("simulated crash")
+        return "html"
+
+    monkeypatch.setattr(sd, "render_html", fake_render)
+    monkeypatch.setattr(
+        sd, "send_email",
+        lambda html, paper_count, date_str, config, papers=None: sent.append(config["recipient_email"]) or True,
+    )
+
+    exit_code = sd.main([])
+
+    assert exit_code == 1  # one failure means exit code 1
+    assert sent == ["ok@example.com"]
