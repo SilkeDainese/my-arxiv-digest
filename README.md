@@ -6,7 +6,7 @@
 
 Created by [Silke S. Dainese](https://silkedainese.github.io) · [dainese@phys.au.dk](mailto:dainese@phys.au.dk) · [ORCID](https://orcid.org/0009-0001-7885-2439)
 
-I built this for myself — I am a PhD student in astronomy at Aarhus University and I wanted a smarter way to stay on top of new papers. Other people found it useful, so I made it public. It works for anyone on arXiv. **Students** — there's a [simpler setup path](#im-a-student--is-there-an-easier-way) for you in the FAQ.
+I built this for myself — I am a PhD student in astronomy at Aarhus University and I wanted a smarter way to stay on top of new papers. Other people found it useful, so I made it public. It works for anyone on arXiv. Students — there's a [simpler setup path](#im-a-student--is-there-an-easier-way) for you in the FAQ.
 
 ---
 
@@ -28,18 +28,18 @@ This creates your personal copy on GitHub. Everything runs there — nothing is 
 
 ### 3. Connect and launch
 
-**Upload your config:**
-**Add file → Upload files** → drag in the config file → **Commit changes**
+Upload your config:
+`Add file` → `Upload files` → drag in the config file → `Commit changes`
 
-**Add your secrets:**
-**Settings → Secrets and variables → Actions**
-&ensp; → **New repository secret** → name: `RECIPIENT_EMAIL`, value: your email address
-&ensp; → **New repository secret** → name: `DIGEST_RELAY_TOKEN`, value: the token from the config page
+Add your secrets:
+`Settings` → `Secrets and variables` → `Actions`
+&ensp; → `New repository secret` → name: `RECIPIENT_EMAIL`, value: your email address
+&ensp; → `New repository secret` → name: `DIGEST_RELAY_TOKEN`, value: the token from the config page
 
-**Start the first run:**
-**Actions** tab → enable workflows → **arXiv Digest** → **Run workflow**
+Start the first run:
+`Actions` tab → enable workflows → `arXiv Digest` → `Run workflow`
 
-**That's it.** Your digest now runs automatically **Mon/Wed/Fri at 9am Danish time**. Papers show up in your inbox — no further action needed.
+**That's it.** Your digest now runs automatically Mon/Wed/Fri at 9am Danish time. Papers show up in your inbox — no further action needed.
 
 ---
 
@@ -50,7 +50,7 @@ This creates your personal copy on GitHub. Everything runs there — nothing is 
 <details>
 <summary>I'm a student — is there an easier way?</summary>
 
-Yes. On the config page, choose the **student mini-setup**. It gives you pre-built interest packages (exoplanets, stars, galaxies, cosmology) with sensible defaults and a lighter weekly schedule. You can customise it later.
+Yes. On the config page, choose the `student mini-setup`. It gives you pre-built interest packages (exoplanets, stars, galaxies, cosmology) with sensible defaults and a lighter weekly schedule. You can customise it later.
 
 If you're from a field other than astronomy and would like similar packages, [write me](mailto:dainese@phys.au.dk) and I'll set it up.
 
@@ -98,17 +98,17 @@ flowchart LR
     E --> F["📧 Digest"]
 ```
 
-1. **Keyword matching** — your keywords vs. each paper's title and abstract, weighted 1–10. Fuzzy: `planet` matches `planetary`.
-2. **AI re-ranking** — reads your free-text research description and re-ranks by *actual relevance*, not just term overlap. The more specific your description, the better.
-3. **Author boost** — papers by your collaborators get bumped. Papers you authored get a celebration section.
+1. Keyword matching — your keywords vs. each paper's title and abstract, weighted 1–10. Fuzzy: `planet` matches `planetary`.
+2. AI re-ranking — reads your free-text research description and re-ranks by *actual relevance*, not just term overlap. The more specific your description, the better.
+3. Author boost — papers by your collaborators get bumped. Papers you authored get a celebration section.
 
 If AI is unavailable, the system cascades automatically:
 
 | Tier | Provider | What happens |
 |------|----------|--------------|
-| 1 | **Claude** (Anthropic) | Used if you add `ANTHROPIC_API_KEY` |
-| 2 | **Gemini** (Google) | Used if you add `GEMINI_API_KEY` |
-| 3 | **Keywords only** | Always works — no key needed |
+| 1 | Claude (Anthropic) | Used if you add `ANTHROPIC_API_KEY` |
+| 2 | Gemini (Google) | Used if you add `GEMINI_API_KEY` |
+| 3 | Keywords only | Always works — no key needed |
 
 If one tier fails, the next takes over. You always get a digest.
 
@@ -135,8 +135,8 @@ Yes — edit the cron line in `.github/workflows/digest.yml`. The default is Mon
 <details>
 <summary>How do I pause or unsubscribe?</summary>
 
-- **Pause:** Go to your repo → **Actions** → **arXiv Digest** → click **⋯** → **Disable workflow**
-- **Delete:** Go to your repo → **Settings** → scroll to Danger Zone → **Delete this repository**
+- Pause: go to your repo → `Actions` → `arXiv Digest` → click `⋯` → `Disable workflow`
+- Delete: go to your repo → `Settings` → scroll to Danger Zone → `Delete this repository`
 
 Every digest email also includes self-service links at the bottom (edit interests, pause, re-run setup, delete).
 
