@@ -73,3 +73,33 @@ jobs:
         with:
           name: student-previews
           path: student_previews/
+
+      - name: Write run summary
+        if: always()
+        run: |
+          echo "### 🔭 Student Digest Run Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Workflow: student-digest" >> $GITHUB_STEP_SUMMARY
+          echo "- Triggered by: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.preview }}" = "true" ]; then
+            echo "- Mode: preview" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Mode: send" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Report failure
+        if: failure()
+        continue-on-error: true
+        run: |
+          if [ -n "$DIGEST_RELAY_URL" ]; then
+            curl -s -X POST "${DIGEST_RELAY_URL}/api/report" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "repo": "${{ github.repository }}",
+                "run_id": "${{ github.run_id }}",
+                "error": "Student digest workflow failed — check logs",
+                "workflow": "student-digest",
+                "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+              }'
+          fi
+        env:
+          DIGEST_RELAY_URL: ${{ vars.DIGEST_RELAY_URL }}

@@ -103,3 +103,38 @@ jobs:
             keyword_stats.json
             feedback_stats.json
           if-no-files-found: ignore
+
+      - name: Write run summary
+        if: always()
+        run: |
+          PAPER_COUNT=$(python -c "
+          import json, pathlib
+          stats = pathlib.Path('keyword_stats.json')
+          if stats.exists():
+              data = json.loads(stats.read_text())
+              print(sum(1 for v in data.values() if v.get('last_hit_date','')))
+          else:
+              print('?')
+          " 2>/dev/null || echo "?")
+          echo "### 🔭 Digest Run Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Papers with keyword hits: $PAPER_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- Workflow: digest" >> $GITHUB_STEP_SUMMARY
+          echo "- Triggered by: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Report failure
+        if: failure()
+        continue-on-error: true
+        run: |
+          if [ -n "$DIGEST_RELAY_URL" ]; then
+            curl -s -X POST "${DIGEST_RELAY_URL}/api/report" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "repo": "${{ github.repository }}",
+                "run_id": "${{ github.run_id }}",
+                "error": "Workflow failed — check logs",
+                "workflow": "digest",
+                "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+              }'
+          fi
+        env:
+          DIGEST_RELAY_URL: ${{ vars.DIGEST_RELAY_URL }}
