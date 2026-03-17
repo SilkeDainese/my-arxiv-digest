@@ -103,6 +103,36 @@ All changes must pass `pytest tests/`. If you add a new function, add tests for 
 
 ---
 
+## Invite Codes
+
+The setup wizard can unlock different shared secrets per invite code. Configure those codes in the Streamlit app secrets.
+
+Example `secrets.toml` / Streamlit Cloud secrets:
+
+```toml
+[invite_codes."friend-easy"]
+relay_token = "relay-token-for-trusted-people"
+gemini_api_key = "AIza..."
+
+[invite_codes."claude-friend"]
+relay_token = "relay-token-for-trusted-people"
+anthropic_api_key = "sk-ant-..."
+
+[invite_codes."mail-only"]
+relay_token = "relay-token-for-trusted-people"
+```
+
+Leave a key out if that code should not get it. For example:
+
+- include `relay_token` to give mail access through the relay
+- include `gemini_api_key` to give shared Gemini access
+- include `anthropic_api_key` to give shared Claude access
+- omit all three for no shared access
+
+The wizard never reveals raw `SMTP_USER` or `SMTP_PASSWORD`.
+
+---
+
 ## Questions
 
 Open an issue or email [dainese@phys.au.dk](mailto:dainese@phys.au.dk). I read everything but response time varies.

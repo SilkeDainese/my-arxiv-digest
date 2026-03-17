@@ -38,6 +38,8 @@ flowchart LR
 
 > *A real digest email. Papers are scored for your research profile and delivered on schedule — no interaction required.*
 
+<img src=".github/sample-digest.png" width="680" alt="Sample arXiv Digest email showing a TOP PICK paper card with relevance score, research context summary, and feedback arrows">
+
 ---
 
 ## Quick Start
@@ -87,6 +89,12 @@ Your first digest email should arrive within a few minutes. If something goes wr
 
 ---
 
+> **Do I need an API key?** No — keyword scoring works without any key. AI keys improve quality but are optional.
+> **Can I change the schedule?** Yes — edit the cron line in `.github/workflows/digest.yml`.
+> **Can I run it locally?** `python digest.py --preview` renders a digest in your browser without sending email.
+
+---
+
 ## Optional Upgrades
 
 Some extras are optional; email delivery is not.
@@ -100,9 +108,8 @@ Some extras are optional; email delivery is not.
 
 ---
 
-## AI Scoring Tiers
-
-If the maintainer gave you an invite code, the setup wizard can unlock shared relay / AI access for your session. Otherwise, the digest in your fork uses the best AI available from your own repo secrets and falls back gracefully:
+<details>
+<summary><strong>Scoring details</strong> — how papers are ranked</summary>
 
 | Tier | Provider | Quality | What happens |
 |------|----------|---------|--------------|
@@ -110,13 +117,13 @@ If the maintainer gave you an invite code, the setup wizard can unlock shared re
 | 2 | **Gemini 2.0 Flash** (Google) | Good | Used if you add a `GEMINI_API_KEY` |
 | 3 | **Keyword fallback** | Basic | Automatic fallback if AI is unavailable |
 
-If one tier fails, it cascades to the next. You always get a digest. No money goes to the creator of this tool — API costs go directly to Anthropic/Google.
+If one tier fails, it cascades to the next. You always get a digest.
 
-### Scoring details
-
-1. **Keyword matching** — your keywords are checked against each paper's title and abstract, weighted by the importance you assigned (1–10). The matcher is fuzzy on purpose: plurals, hyphenation, and close variants like `planet` / `planetary` are treated as related.
-2. **AI re-ranking** — the AI reads your `research_context` and re-ranks papers using that description. The more specific your research context, the better the scoring.
+1. **Keyword matching** — your keywords are checked against each paper's title and abstract, weighted by the importance you assigned (1–10). The matcher is fuzzy: plurals, hyphenation, and close variants are treated as related.
+2. **AI re-ranking** — the AI reads your `research_context` and re-ranks papers for relevance to your actual research, not just term overlap.
 3. **Author boost** — papers by your `research_authors` get a relevance bump. Papers you authored yourself get a celebration section.
+
+</details>
 
 ---
 
@@ -170,64 +177,17 @@ Pick one safe email setup:
 1. If the maintainer gave you an invite code, enter it in the setup wizard and copy the revealed secrets into your repo.
 2. Or add `SMTP_USER` and `SMTP_PASSWORD` to send from your own mailbox.
 
-Gmail users need an [App Password](https://myaccount.google.com/apppasswords); Outlook users should also set `smtp_server: "smtp.office365.com"` in their `config.yaml`.
-
-### Invite Codes For Maintainers
-
-The setup wizard can unlock different shared secrets per invite code. Configure those codes in the Streamlit app secrets.
-
-Example `secrets.toml` / Streamlit Cloud secrets:
-
-```toml
-[invite_codes."friend-easy"]
-relay_token = "relay-token-for-trusted-people"
-gemini_api_key = "AIza..."
-
-[invite_codes."claude-friend"]
-relay_token = "relay-token-for-trusted-people"
-anthropic_api_key = "sk-ant-..."
-
-[invite_codes."mail-only"]
-relay_token = "relay-token-for-trusted-people"
-```
-
-Leave a key out if that code should not get it. For example:
-
-- include `relay_token` to give mail access through the relay
-- include `gemini_api_key` to give shared Gemini access
-- include `anthropic_api_key` to give shared Claude access
-- omit all three for no shared access
-
-The wizard never reveals raw `SMTP_USER` or `SMTP_PASSWORD`.
+Gmail users need an [App Password](https://myaccount.google.com/apppasswords); Outlook users should also set `smtp_server: "smtp.office365.com"` in their `config.yaml`. Maintainers: see [CONTRIBUTING.md](CONTRIBUTING.md) for invite code setup.
 
 ---
 
 ## Development
 
-### Run locally
-
 ```bash
 pip install -r requirements.txt
-export RECIPIENT_EMAIL="you@example.com"
-export DIGEST_RELAY_TOKEN="your-relay-token"  # if you have relay access
-# or, send directly from your own mailbox instead:
-export SMTP_USER="you@gmail.com"
-export SMTP_PASSWORD="your-app-password"
-python digest.py
-```
-
-To preview the digest in your browser without sending an email:
-
-```bash
-python digest.py --preview
-```
-
-### Run the setup wizard locally
-
-```bash
-cd setup
-pip install -r requirements.txt
-streamlit run app.py
+python digest.py --preview        # renders in browser, no email
+python digest.py                  # full run (needs RECIPIENT_EMAIL + email secrets)
+cd setup && streamlit run app.py  # run the setup wizard locally
 ```
 
 ---
