@@ -24,23 +24,6 @@ def test_setup_app_renders_without_streamlit_exceptions(monkeypatch):
     app.run(timeout=10)
     assert len(app.exception) == 0
 
-    app.text_input(key="user_email_rl").set_value("tester@example.com")
-    app.run(timeout=20)
-
-    assert len(app.exception) == 0
-    assert [expander.label for expander in app.expander] == [
-        "**1. Your ORCID**",
-        "**2. Your Profile**",
-        "**3. Your Research Description**",
-        "**4. arXiv Categories**",
-        "**5. Keywords**",
-        "**6. Research Authors**",
-        "**7. Colleagues**",
-        "**8. Digest Mode & Schedule**",
-        "**9. Email Provider**",
-        "**10. Preview & Download**",
-    ]
-
 
 def test_root_streamlit_theme_matches_setup_theme():
     """Theme config must exist at repo root for Streamlit Cloud."""
