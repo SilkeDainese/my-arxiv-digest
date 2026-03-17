@@ -21,34 +21,26 @@ From another field? [Write me](mailto:dainese@phys.au.dk) and I'll set up packag
 
 ## Quick Start
 
-Three steps. No terminal needed.
+> 1. **[Open the config page →](https://arxiv-digest-setup.streamlit.app)** — it guides you through everything. Download `config.yaml` when done.
+> 2. **[Fork this repo →](https://github.com/SilkeDainese/arxiv-digest/fork)**
+> 3. Upload `config.yaml`: `Add file` → `Upload files` → drag it in → `Commit changes`
+> 4. Add [secrets](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions): `Settings` → `Secrets and variables` → `Actions` → `New repository secret`
+>    - `RECIPIENT_EMAIL` — your email address
+>    - `DIGEST_RELAY_TOKEN` — the token from the config page *(no invite code? use `SMTP_USER` + `SMTP_PASSWORD` [instead](https://myaccount.google.com/apppasswords))*
+> 5. Run it: `Actions` → enable workflows → `arXiv Digest` → `Run workflow`
+>
+> **That's it.** *Runs automatically Mon/Wed/Fri at 9am Danish time.*
 
-### 1. Describe your research
+<details>
+<summary>Something not working?</summary>
 
-**[Open the config page →](https://arxiv-digest-setup.streamlit.app)**
+- Make sure workflows are enabled — `Actions` tab → click "I understand my workflows, go ahead and enable them"
+- Secrets go in *your fork*, not the original repo
+- The config file must be named exactly `config.yaml` in the repo root
+- First run: use `Run workflow` manually to test — check the log if no email arrives
+- Outlook users: set `smtp_server: "smtp.office365.com"` in `config.yaml`
 
-Fill in your name, research interests, keywords, and email address. The page generates a config file — download it.
-
-### 2. Get your own copy
-
-**[Fork this repo →](https://github.com/SilkeDainese/arxiv-digest/fork)**
-
-This creates your personal copy on GitHub. Everything runs there — nothing is shared back.
-
-### 3. Connect and launch
-
-1. Upload your config file:
-   `Add file` → `Upload files` → drag in the config file → `Commit changes`
-
-2. Add two [repository secrets](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions):
-   `Settings` → `Secrets and variables` → `Actions` → `New repository secret`
-   - `RECIPIENT_EMAIL` — your email address
-   - `DIGEST_RELAY_TOKEN` — the token from the config page
-
-3. Run it:
-   `Actions` tab → enable workflows → `arXiv Digest` → `Run workflow`
-
-**That's it.** *Your digest now runs automatically Mon/Wed/Fri at 9am Danish time. Papers show up in your inbox — no further action needed.*
+</details>
 
 ---
 
@@ -71,7 +63,7 @@ You can send digests from your own email instead. Add these secrets instead of t
 - `SMTP_USER` — your email address
 - `SMTP_PASSWORD` — an app password ([Gmail →](https://myaccount.google.com/apppasswords))
 
-Outlook users: also set `smtp_server: "smtp.office365.com"` in your [config file](config.example.yaml).
+Outlook users: also set `smtp_server: "smtp.office365.com"` in [`config.yaml`](config.example.yaml).
 
 </details>
 
@@ -94,7 +86,7 @@ Run `python -m scripts.friend_setup` from a checkout of this repo. It opens the 
 <details>
 <summary>How does scoring work?</summary>
 
-You describe your research in the config file — keywords, field, a free-text description of your work, and optionally your collaborators. The digest scores every new arXiv paper in three steps:
+You describe your research in `config.yaml` — keywords, field, a free-text description of your work, and optionally your collaborators. The digest scores every new arXiv paper in three steps:
 
 ```mermaid
 flowchart LR
@@ -126,7 +118,7 @@ If one tier fails, the next takes over. You always get a digest.
 
 When you click ↑ or ↓ on a paper card in your digest email, it creates a GitHub issue in your fork. The next run reads those issues automatically — upvoted keywords get a scoring boost, downvoted ones get dampened. The system learns what you care about over time.
 
-To enable feedback arrows, set `github_repo: "yourusername/arxiv-digest"` in your [config file](config.example.yaml).
+To enable feedback arrows, set `github_repo: "yourusername/arxiv-digest"` in [`config.yaml`](config.example.yaml).
 
 </details>
 
