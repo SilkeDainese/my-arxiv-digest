@@ -6,7 +6,16 @@
 
 Created by [Silke S. Dainese](https://silkedainese.github.io) · [dainese@phys.au.dk](mailto:dainese@phys.au.dk) · [ORCID](https://orcid.org/0009-0001-7885-2439)
 
-I built this for myself — I am a PhD student in astronomy at Aarhus University and I wanted a smarter way to stay on top of new papers. Other people found it useful, so I made it public. It works for anyone on arXiv. Students — there's a [simpler setup path](#im-a-student--is-there-an-easier-way) for you in the FAQ.
+I built this for myself — I am a PhD student in astronomy at Aarhus University and I wanted a smarter way to stay on top of new papers. Other people found it useful, so I made it public. It works for anyone on arXiv.
+
+<details>
+<summary><sub>🎓 Students — there's an easier setup for you</sub></summary>
+
+On the config page, choose the `student mini-setup`. You get pre-built interest packages (exoplanets, stars, galaxies, cosmology) with sensible defaults and a lighter weekly schedule. You can customise it later.
+
+From another field? [Write me](mailto:dainese@phys.au.dk) and I'll set up packages for your speciality.
+
+</details>
 
 ---
 
@@ -50,9 +59,7 @@ This creates your personal copy on GitHub. Everything runs there — nothing is 
 <details>
 <summary>I'm a student — is there an easier way?</summary>
 
-Yes. On the config page, choose the `student mini-setup`. It gives you pre-built interest packages (exoplanets, stars, galaxies, cosmology) with sensible defaults and a lighter weekly schedule. You can customise it later.
-
-If you're from a field other than astronomy and would like similar packages, [write me](mailto:dainese@phys.au.dk) and I'll set it up.
+Yes! See the [student setup](#-students--theres-an-easier-setup-for-you) at the top of this page.
 
 </details>
 
