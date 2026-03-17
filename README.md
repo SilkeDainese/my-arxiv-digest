@@ -18,12 +18,9 @@ I built this during my PhD in astronomy at Aarhus University to stay on top of n
 ---
 
 ## Quick Start
-1. **[Open the config page →](https://arxiv-digest-setup.streamlit.app)** — it guides you through everything. Download `config.yaml` when done.
-2. **[Fork this repo →](https://github.com/SilkeDainese/arxiv-digest/fork)**, then upload `config.yaml` to the repo root:
-   `Add file` → `Upload files` → select `config.yaml` → `Commit changes`
-3. Add [secrets](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions): `Settings` → `Secrets and variables` → `Actions` → `New repository secret`
-   - `RECIPIENT_EMAIL` — your email address
-   - `DIGEST_RELAY_TOKEN` — the token from the config page *(no invite code? use `SMTP_USER` + `SMTP_PASSWORD` [instead](https://myaccount.google.com/apppasswords))*
+1. **[Open the config page →](https://arxiv-digest-setup.streamlit.app)** — it walks you through everything, including secrets. Download `config.yaml` when done.
+2. **[Fork this repo →](https://github.com/SilkeDainese/arxiv-digest/fork)** and upload `config.yaml` to the repo root.
+3. Add the [secrets](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions) the config page told you to add.
 4. Run it: `Actions` → enable workflows → `arXiv Digest` → `Run workflow`
 
 > **That's it.** *Runs automatically Mon/Wed/Fri at 9am Danish time.*
