@@ -92,6 +92,8 @@ Your first digest email should arrive within a few minutes. If something goes wr
 > **Do I need an API key?** No — keyword scoring works without any key. AI keys improve quality but are optional.
 > **Can I change the schedule?** Yes — edit the cron line in `.github/workflows/digest.yml`.
 > **Can I run it locally?** `python digest.py --preview` renders a digest in your browser without sending email.
+> **How do I pause or unsubscribe?** Disable the workflow or delete the fork — see [Managing Your Digest](#managing-your-digest).
+> **How do I give feedback on papers?** Click the ↑/↓ arrows on each card. Future digests learn from your votes.
 
 ---
 
