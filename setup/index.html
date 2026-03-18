@@ -189,6 +189,7 @@
 
   /* Highlight pulse when toggled on */
   @keyframes highlightPulse { 0%{background:var(--pine-wash);} 100%{background:transparent;} }
+  @keyframes chipPulse { 0%,100%{outline:2px solid var(--pine);} 50%{outline:3px solid white;box-shadow:0 0 6px rgba(255,255,255,.8);} }
   .email-card-section.highlight { animation:highlightPulse 1.5s ease; outline:2px solid var(--pine-light); outline-offset:2px; border-radius:4px; }
   .email-card-tags.highlight { animation:highlightPulse 1.5s ease; outline:2px solid var(--pine-light); outline-offset:2px; border-radius:4px; }
   .email-card-score.highlight { animation:highlightPulse 1.5s ease; outline:2px solid var(--pine-light); outline-offset:2px; border-radius:4px; }
@@ -959,6 +960,11 @@
    All API calls go to the Flask backend at /api/...
    ═══════════════════════════════════════════════════════════ */
 
+// ── Utilities ──
+function escapeHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
 // ── State ──
 const state = {
   geminiKey: '',
@@ -1192,6 +1198,11 @@ async function autoFillAll(){
     btn.textContent = 'Auto-fill'; btn.style.opacity = '1';
     return;
   }
+  if(!state.orcidData) {
+    st.textContent = 'Look up your ORCID first (Step 1) to get the best suggestions';
+    btn.textContent = 'Auto-fill'; btn.style.opacity = '1';
+    return;
+  }
 
   try {
     const resp = await fetch('/api/ai/suggest', {
@@ -1199,7 +1210,7 @@ async function autoFillAll(){
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
         research_description: text,
-        orcid_keywords: state.orcidData?.keywords || null,
+        orcid_keywords: state.orcidData.keywords || null,
         ...getAIKeys(),
       }),
     });
@@ -1342,7 +1353,7 @@ function addColleague(chipEl, name) {
   const ghost = collChips.querySelector('.chip-ghost');
   const newChip = document.createElement('span');
   newChip.className = 'chip chip-pine';
-  newChip.innerHTML = `${name} <span class="remove" onclick="removeColleague(this, '${name.replace(/'/g, "\\'")}')">&times;</span>`;
+  newChip.innerHTML = `${escapeHtml(name)} <span class="remove" onclick="removeColleague(this, '${name.replace(/'/g, "\\'")}')">&times;</span>`;
   collChips.insertBefore(newChip, ghost);
 
   const clearBtn = document.getElementById('coll-clear-btn');
@@ -1773,9 +1784,13 @@ function closeUpload(){document.getElementById('upload-overlay').classList.remov
 
 async function handleUpload(input){
   const f = (input.files || [])[0]; if(!f) return;
+  const st = document.getElementById('upload-status');
+  if(f.size > 512 * 1024) {
+    st.style.display = 'block'; st.style.color = '#C0392B';
+    st.textContent = 'File too large (max 512 KB)'; return;
+  }
   const reader = new FileReader();
   reader.onload = async function(e){
-    const st = document.getElementById('upload-status');
     st.style.display = 'block'; st.style.color = 'var(--pine)';
     st.textContent = 'Reading ' + f.name + '...';
     try {
@@ -1865,14 +1880,24 @@ function makeKwTableRow(name, weight) {
   const label = w <= 2 ? 'loosely follow' : w <= 5 ? 'interested' : w <= 8 ? 'main interest' : 'everything';
   const tr = document.createElement('tr');
   const safeN = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-  tr.innerHTML = `<td class="kw-name">${name}</td><td><div class="kw-weight"><span class="kw-arrow" onclick="adjustWeight(this,1)">&#x25B2;</span><span class="kw-score">${w}</span><span class="kw-arrow" onclick="adjustWeight(this,-1)">&#x25BC;</span></div><span class="kw-label ${cls}">${label}</span></td><td style="text-align:center;"><input type="checkbox" style="accent-color:var(--pine);width:14px;height:14px;"></td><td style="text-align:center;color:var(--warm-grey);cursor:pointer;" onclick="removeKeyword(this,'${safeN}')">&times;</td>`;
+  tr.innerHTML = `<td class="kw-name">${escapeHtml(name)}</td><td><div class="kw-weight"><span class="kw-arrow" onclick="adjustWeight(this,1)">&#x25B2;</span><span class="kw-score">${w}</span><span class="kw-arrow" onclick="adjustWeight(this,-1)">&#x25BC;</span></div><span class="kw-label ${cls}">${label}</span></td><td style="text-align:center;"><input type="checkbox" style="accent-color:var(--pine);width:14px;height:14px;"></td><td style="text-align:center;color:var(--warm-grey);cursor:pointer;" onclick="removeKeyword(this,'${safeN}')">&times;</td>`;
   return tr;
 }
 
 // ── Add keyword (manual entry) ──
 function addKeyword(value) {
   const name = (value || '').trim().toLowerCase();
-  if(!name || state.keywords[name] !== undefined) return;
+  if(!name) return;
+  if(state.keywords[name] !== undefined) {
+    const chips = document.getElementById('kw-chips').querySelectorAll('.chip-pine');
+    for(const c of chips) {
+      if(c.textContent.replace(/\u00d7/g,'').trim() === name) {
+        c.style.animation = 'none'; void c.offsetWidth; c.style.animation = 'chipPulse 0.8s ease';
+        break;
+      }
+    }
+    return;
+  }
   state.keywords[name] = 7;
   // Chip
   const kwChips = document.getElementById('kw-chips');
@@ -1880,7 +1905,7 @@ function addKeyword(value) {
   const chip = document.createElement('span');
   chip.className = 'chip chip-pine';
   const safeN = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-  chip.innerHTML = `${name} <span class="remove" onclick="removeKeyword(this,'${safeN}')">&times;</span>`;
+  chip.innerHTML = `${escapeHtml(name)} <span class="remove" onclick="removeKeyword(this,'${safeN}')">&times;</span>`;
   kwChips.insertBefore(chip, ghost);
   // Table
   const tbody = document.getElementById('kw-tbody');
@@ -1894,14 +1919,24 @@ function addKeyword(value) {
 // ── Add colleague (manual entry) ──
 function addColleagueManual(value) {
   const name = (value || '').trim();
-  if(!name || state.colleagues.includes(name)) return;
+  if(!name) return;
+  if(state.colleagues.includes(name)) {
+    const chips = document.getElementById('coll-chips').querySelectorAll('.chip-pine');
+    for(const c of chips) {
+      if(c.textContent.replace(/\u00d7/g,'').trim() === name) {
+        c.style.animation = 'none'; void c.offsetWidth; c.style.animation = 'chipPulse 0.8s ease';
+        break;
+      }
+    }
+    return;
+  }
   state.colleagues.push(name);
   const collChips = document.getElementById('coll-chips');
   const ghost = collChips.querySelector('.chip-ghost');
   const chip = document.createElement('span');
   chip.className = 'chip chip-pine';
   const safeN = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-  chip.innerHTML = `${name} <span class="remove" onclick="removeColleague(this,'${safeN}')">&times;</span>`;
+  chip.innerHTML = `${escapeHtml(name)} <span class="remove" onclick="removeColleague(this,'${safeN}')">&times;</span>`;
   collChips.insertBefore(chip, ghost);
   const clearBtn = document.getElementById('coll-clear-btn');
   if(clearBtn) clearBtn.style.display = '';
@@ -1979,7 +2014,7 @@ function fillFromConfig(cfg) {
       const chip = document.createElement('span');
       chip.className = 'chip chip-pine';
       const safeN = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-      chip.innerHTML = `${name} <span class="remove" onclick="removeKeyword(this,'${safeN}')">&times;</span>`;
+      chip.innerHTML = `${escapeHtml(name)} <span class="remove" onclick="removeKeyword(this,'${safeN}')">&times;</span>`;
       kwChips.insertBefore(chip, ghost);
       tbody.appendChild(makeKwTableRow(name, weight));
     });

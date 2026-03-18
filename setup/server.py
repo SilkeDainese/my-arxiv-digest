@@ -599,6 +599,8 @@ def students_register():
     package_ids = data.get("package_ids", [])
     max_papers = data.get("max_papers_per_week", 6)
 
+    if ' ' in email:
+        return jsonify({"error": "Invalid email address"}), 400
     if not email.endswith("@uni.au.dk"):
         return jsonify({"error": "Only @uni.au.dk emails accepted"}), 400
     if len(password) < 4:

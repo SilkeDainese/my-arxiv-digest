@@ -68,6 +68,9 @@ def load_config() -> dict[str, Any]:
     with open(config_file) as f:
         cfg = yaml.safe_load(f)
 
+    if not isinstance(cfg, dict):
+        raise ValueError("config.yaml is empty or not a YAML mapping")
+
     # ── New fields with defaults ──
     cfg.setdefault("digest_name", "arXiv Digest")
     cfg.setdefault("researcher_name", "Reader")
@@ -114,6 +117,8 @@ def load_config() -> dict[str, Any]:
         cfg.setdefault("min_score", 3)
 
     # ── Backward compat: flat keyword list → weighted dict ──
+    if isinstance(cfg["keywords"], str):
+        raise ValueError("keywords must be a YAML mapping (keyword: weight), not a bare string")
     if isinstance(cfg["keywords"], list):
         cfg["keywords"] = {kw: 5 for kw in cfg["keywords"]}
     if not isinstance(cfg["keyword_aliases"], dict):
@@ -134,6 +139,8 @@ def load_config() -> dict[str, Any]:
         cfg["keyword_aliases"] = normalised_aliases
 
     # ── Backward compat: flat colleagues list → people/institutions ──
+    if not isinstance(cfg.get("colleagues"), (dict, list)):
+        cfg["colleagues"] = {}
     if isinstance(cfg["colleagues"], list):
         cfg["colleagues"] = {"people": cfg["colleagues"], "institutions": []}
     elif isinstance(cfg["colleagues"], dict):
@@ -815,10 +822,10 @@ def _default_analysis(paper: dict[str, Any]) -> dict[str, Any]:
     """Fallback analysis fields when AI scoring fails."""
     # keyword_hits is normalized 0-100, map to 1-10 scale
     bias = paper.get("feedback_bias", 0)
-    kw_score = round(paper["keyword_hits"] / 10)
+    kw_score = round(paper.get("keyword_hits", 0) / 10)
     author_boost = len(paper["known_authors"]) * 3
     feedback_adj = round(bias * 0.4)
-    has_signal = paper["keyword_hits"] > 0 or paper["known_authors"]
+    has_signal = paper.get("keyword_hits", 0) > 0 or paper["known_authors"]
     raw_score = kw_score + author_boost + feedback_adj if has_signal else 1
     score = min(10, max(1, raw_score))
     return {
@@ -985,7 +992,7 @@ def _fallback_analyse(papers: list[dict[str, Any]], config: dict[str, Any]) -> l
             why = "Discovery mode — scored by team size and author matches."
         else:
             # keyword_hits is normalized 0-100, map to 1-10 relevance
-            score = min(10, max(1, round(p["keyword_hits"] / 10) + len(p["known_authors"]) * 3 + round(bias * 0.4)))
+            score = min(10, max(1, round(p.get("keyword_hits", 0) / 10) + len(p["known_authors"]) * 3 + round(bias * 0.4)))
             why = "Matched your keywords." + (
                 f" Known author(s): {', '.join(p['known_authors'])}." if p["known_authors"] else ""
             )
