@@ -1247,7 +1247,7 @@ async function autoFillAll(){
     const kwChips = document.getElementById('kw-chips');
     const kwNames = Object.keys(kws);
     kwChips.innerHTML = kwNames.map(k =>
-      `<span class="chip chip-pine">${k} <span class="remove" onclick="removeKeyword(this, '${k.replace(/'/g, "\\'")}')">&times;</span></span>`
+      `<span class="chip chip-pine">${escapeHtml(k)} <span class="remove" onclick="removeKeyword(this, '${k.replace(/'/g, "\\'")}')">&times;</span></span>`
     ).join('') + '<span class="chip chip-ghost">+ add keyword</span>';
 
     // Fill advanced keyword table
@@ -1259,7 +1259,7 @@ async function autoFillAll(){
       const cls = w <= 2 ? 'low' : w <= 5 ? 'mid' : w <= 8 ? 'high' : 'max';
       const label = w <= 2 ? 'loosely follow' : w <= 5 ? 'interested' : w <= 8 ? 'main interest' : 'everything';
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td class="kw-name">${name}</td><td><div class="kw-weight"><span class="kw-arrow" onclick="adjustWeight(this,1)">&#x25B2;</span><span class="kw-score">${w}</span><span class="kw-arrow" onclick="adjustWeight(this,-1)">&#x25BC;</span></div><span class="kw-label ${cls}">${label}</span></td><td style="text-align:center;"><input type="checkbox" style="accent-color:var(--pine);width:14px;height:14px;"></td><td style="text-align:center;color:var(--warm-grey);cursor:pointer;" onclick="this.parentElement.remove()">&times;</td>`;
+      tr.innerHTML = `<td class="kw-name">${escapeHtml(name)}</td><td><div class="kw-weight"><span class="kw-arrow" onclick="adjustWeight(this,1)">&#x25B2;</span><span class="kw-score">${w}</span><span class="kw-arrow" onclick="adjustWeight(this,-1)">&#x25BC;</span></div><span class="kw-label ${cls}">${label}</span></td><td style="text-align:center;"><input type="checkbox" style="accent-color:var(--pine);width:14px;height:14px;"></td><td style="text-align:center;color:var(--warm-grey);cursor:pointer;" onclick="this.parentElement.remove()">&times;</td>`;
       tbody.appendChild(tr);
     });
 
@@ -1610,7 +1610,7 @@ async function stuSubscribe(){
     }
     btn.textContent = 'Subscribed!'; btn.style.background = 'var(--pine-light)';
     st.style.color = 'var(--pine)';
-    st.innerHTML = `<div style="margin-bottom:6px;">Confirmation email sent to ${email}</div>`
+    st.innerHTML = `<div style="margin-bottom:6px;">Confirmation email sent to ${escapeHtml(email)}</div>`
       + `<div style="background:var(--ash-white);border:1px solid var(--card-border);border-radius:4px;padding:8px 10px;font-family:DM Mono,monospace;font-size:10px;color:var(--warm-grey);text-align:left;white-space:pre;line-height:1.6;">`
       + JSON.stringify(data, null, 2) + '</div>';
   } catch(e) {
@@ -1619,27 +1619,6 @@ async function stuSubscribe(){
   }
 }
 
-// ── Legacy compatibility aliases ──
-function aiSuggestCats(){ autoFillAll(); }
-function aiSuggestKeywords(){ autoFillAll(); }
-function aiSuggestColleagues(){ aiSuggestPeople(); }
-
-function clearAiCats(){
-  document.querySelectorAll('#cat-container .chip-pine').forEach(c=>{
-    const name=c.textContent.replace(/\s*\u00d7\s*/,'').trim();
-    c.className='chip chip-ghost';c.style.fontStyle='normal';c.innerHTML=name;
-  });
-  document.getElementById('cat-astro-count').textContent='0/6';
-  document.getElementById('ai-clear-cats-btn').style.display='none';
-  document.getElementById('ai-cats-status').style.display='none';
-}
-function clearAiKeywords(){
-  const tbody=document.getElementById('kw-tbody');
-  tbody.innerHTML='<tr id="kw-empty-row"><td colspan="5" style="text-align:center;color:var(--warm-grey);font-style:italic;padding:16px;">No keywords yet. Add manually below or use AI suggest.</td></tr>';
-  document.getElementById('ai-clear-kw-btn').style.display='none';
-  document.getElementById('ai-kw-status').style.display='none';
-}
-function aiSuggestColleagues(){aiSuggestPeople();}
 function setRadio(el){el.parentElement.querySelectorAll('.radio-option').forEach(o=>o.classList.remove('active'));el.classList.add('active');}
 function pickFreq(el,label){setRadio(el);document.getElementById('freq-label').textContent=label;setTimeout(()=>{document.getElementById('freq-picker').style.display='none';},200);}
 function toggleAdvanced(linkEl,targetId){const t=document.getElementById(targetId);const open=t.style.display!=='none';t.style.display=open?'none':'block';linkEl.innerHTML=linkEl.innerHTML.replace(open?'\u2191':'\u2193',open?'\u2193':'\u2191');}
@@ -1914,6 +1893,7 @@ function initCatChips() {
 // ── Fill form from uploaded config ──
 function fillFromConfig(cfg) {
   state.orcidData = null;  // clear stale ORCID data so AI calls use the loaded config
+  document.getElementById('orcid-result').style.display = 'none';  // hide stale ORCID card
   // Categories
   if(Array.isArray(cfg.categories) && cfg.categories.length) {
     // Clear existing
