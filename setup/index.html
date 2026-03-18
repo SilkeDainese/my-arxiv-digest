@@ -1626,68 +1626,6 @@ function toggleAdvanced(linkEl,targetId){const t=document.getElementById(targetI
 function toggleCat(id){document.getElementById(id).classList.toggle('open');}
 function toggleFoldout(id){document.getElementById(id).classList.toggle('collapsed');}
 
-let currentCardPreset='default';
-let scoreVisible=true;
-function toggleScoreBadge(){
-  scoreVisible=!scoreVisible;
-  const item=document.getElementById('score-toggle').closest('.card-order-item');
-  item.classList.toggle('off',!scoreVisible);
-  const el=document.getElementById('ep-score');
-  if(el){el.style.display=scoreVisible?'':'none';if(scoreVisible){el.classList.remove('highlight');void el.offsetWidth;el.classList.add('highlight');setTimeout(()=>el.classList.remove('highlight'),1200);}}
-  currentCardPreset='custom';
-  document.querySelectorAll('#card-customize .radio-option').forEach(r=>r.classList.remove('active'));
-}
-function toggleOrderItem(li){
-  li.classList.toggle('off');
-  currentCardPreset='custom';
-  // Deselect preset radios since user customised
-  document.querySelectorAll('#card-customize .radio-option').forEach(r=>r.classList.remove('active'));
-  syncCardPreview();
-}
-function moveOrderItem(li,dir){
-  const list=li.parentElement;
-  if(dir===-1&&li.previousElementSibling){list.insertBefore(li,li.previousElementSibling);}
-  else if(dir===1&&li.nextElementSibling){list.insertBefore(li.nextElementSibling,li);}
-  li.style.animation='none';void li.offsetWidth;li.style.animation='slideIn .2s ease';
-  syncCardPreview();
-}
-function syncCardPreview(){
-  const body=document.querySelector('.email-card-body');
-  const items=[...document.querySelectorAll('#card-order-list .card-order-item')];
-  items.forEach(li=>{
-    const name=li.dataset.el;
-    const el=document.getElementById('ep-'+name);
-    if(!el)return;
-    const on=!li.classList.contains('off');
-    el.style.display=on?'':'none';
-    if(on){body.appendChild(el);el.classList.remove('highlight');void el.offsetWidth;el.classList.add('highlight');setTimeout(()=>el.classList.remove('highlight'),1200);}
-  });
-  // Keep abstract toggle at the end
-  const absToggle=body.querySelector('.abstract-toggle');
-  if(absToggle)body.appendChild(absToggle.parentElement);
-}
-function setPreset(el,preset){
-  setRadio(el);
-  currentCardPreset=preset;
-  const presets={default:{summary:1,why:1,score:1,tags:1,finding:0},minimal:{summary:0,why:0,score:0,tags:0,finding:0},full:{summary:1,why:1,score:1,tags:1,finding:1}};
-  const p=presets[preset];
-  document.querySelectorAll('#card-order-list .card-order-item').forEach(li=>{
-    const on=!!p[li.dataset.el];
-    li.classList.toggle('off',!on);
-  });
-  // Score badge (separate toggle)
-  scoreVisible=!!p.score;
-  const scoreItem=document.getElementById('score-toggle').closest('.card-order-item');
-  scoreItem.classList.toggle('off',!scoreVisible);
-  const ep=document.getElementById('ep-score');
-  if(ep)ep.style.display=scoreVisible?'':'none';
-  syncCardPreview();
-}
-function getCardLabel(){
-  if(currentCardPreset==='custom')return 'Custom card';
-  return currentCardPreset.charAt(0).toUpperCase()+currentCardPreset.slice(1)+' card';
-}
-
 /* ── Upload overlay ── */
 function openUpload(){document.getElementById('upload-overlay').classList.add('show');}
 function closeUpload(){document.getElementById('upload-overlay').classList.remove('show');document.getElementById('upload-status').style.display='none';}
