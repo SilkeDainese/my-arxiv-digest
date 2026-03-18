@@ -397,7 +397,7 @@
           <div class="cat-expander-header" onclick="toggleCat('cat-astro')"><span class="cat-expander-name">Astrophysics</span><div class="cat-expander-meta"><span class="cat-count" id="cat-astro-count">0/6</span><span class="cat-expander-chevron">&#x276F;</span></div></div>
           <div class="cat-expander-body">
             <div class="chip-group" id="cat-astro-chips"><span class="chip chip-ghost" style="font-style:normal;">astro-ph.SR</span><span class="chip chip-ghost" style="font-style:normal;">astro-ph.EP</span><span class="chip chip-ghost" style="font-style:normal;">astro-ph.GA</span><span class="chip chip-ghost" style="font-style:normal;">astro-ph.IM</span><span class="chip chip-ghost" style="font-style:normal;">astro-ph.CO</span><span class="chip chip-ghost" style="font-style:normal;">astro-ph.HE</span></div>
-            <div style="display:flex;gap:8px;margin-top:8px;"><button class="btn-clear">Select all</button><button class="btn-clear">Clear</button></div>
+            <div style="display:flex;gap:8px;margin-top:8px;"><button class="btn-clear" onclick="selectAllCats('cat-astro')">Select all</button><button class="btn-clear" onclick="clearGroupCats('cat-astro')">Clear</button></div>
           </div>
         </div>
         <div class="cat-expander" id="cat-physics"><div class="cat-expander-header" onclick="toggleCat('cat-physics')"><span class="cat-expander-name">Physics</span><div class="cat-expander-meta"><span class="cat-count">0/12</span><span class="cat-expander-chevron">&#x276F;</span></div></div><div class="cat-expander-body"><div class="chip-group"><span class="chip chip-ghost" style="font-style:normal;">hep-th</span><span class="chip chip-ghost" style="font-style:normal;">hep-ph</span><span class="chip chip-ghost" style="font-style:normal;">hep-ex</span><span class="chip chip-ghost" style="font-style:normal;">gr-qc</span><span class="chip chip-ghost" style="font-style:normal;">nucl-th</span><span class="chip chip-ghost" style="font-style:normal;">quant-ph</span></div></div></div>
@@ -411,11 +411,11 @@
 
       <div id="kw-chips-view">
         <div class="chip-group" id="kw-chips">
-          <span class="chip chip-ghost">+ add keyword</span>
+          <span class="chip chip-ghost" onclick="document.getElementById('kw-input').focus()">+ add keyword</span>
         </div>
         <div style="display:flex;gap:6px;margin-top:8px;align-items:center;">
-          <div class="mock-input" style="flex:3;padding:7px 12px;font-size:12px;">Add a keyword...</div>
-          <button class="btn-secondary" style="flex-shrink:0;padding:7px 14px;">Add</button>
+          <input type="text" id="kw-input" class="ai-key-input" placeholder="Add a keyword..." style="flex:3;border-radius:6px;" autocomplete="off" onkeydown="if(event.key==='Enter'){addKeyword(this.value);event.preventDefault();}">
+          <button class="btn-secondary" style="flex-shrink:0;padding:7px 14px;" onclick="addKeyword(document.getElementById('kw-input').value)">Add</button>
         </div>
       </div>
 
@@ -446,9 +446,14 @@
 
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div class="chip-group" id="coll-chips" style="flex:1;">
-          <span class="chip chip-ghost">+ add person</span>
+          <span class="chip chip-ghost" onclick="document.getElementById('coll-input').focus()">+ add person</span>
         </div>
         <button class="btn-clear" onclick="clearColleagues()" id="coll-clear-btn" style="margin-left:8px;display:none;">Clear</button>
+      </div>
+
+      <div style="display:flex;gap:6px;margin-top:8px;align-items:center;">
+        <input type="text" id="coll-input" class="ai-key-input" placeholder="Add a person (e.g. Smith, J)..." style="flex:3;border-radius:6px;" autocomplete="off" onkeydown="if(event.key==='Enter'){addColleagueManual(this.value);event.preventDefault();}">
+        <button class="btn-secondary" style="flex-shrink:0;padding:7px 14px;" onclick="addColleagueManual(document.getElementById('coll-input').value)">Add</button>
       </div>
 
       <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
@@ -1266,6 +1271,7 @@ function unselectCat(removeEl) {
   chip.innerHTML = name;
   chip.onclick = () => selectCat(chip, name);
   state.selectedCats = state.selectedCats.filter(c => c !== name);
+  updateCatCount(chip.closest('.cat-expander'));
 }
 
 function selectCat(chip, name) {
@@ -1273,6 +1279,7 @@ function selectCat(chip, name) {
   chip.innerHTML = name + ' <span class="remove" onclick="event.stopPropagation();unselectCat(this)">&times;</span>';
   chip.onclick = null;
   if(!state.selectedCats.includes(name)) state.selectedCats.push(name);
+  updateCatCount(chip.closest('.cat-expander'));
 }
 
 function removeKeyword(removeEl, name) {
@@ -1521,29 +1528,7 @@ function setPreset(el, preset){
   syncCardPreview();
 }
 
-// ── Upload config overlay ──
-function openUpload(){ document.getElementById('upload-overlay').classList.add('show'); }
-function closeUpload(){ document.getElementById('upload-overlay').classList.remove('show'); document.getElementById('upload-status').style.display = 'none'; }
-
-function handleUpload(input){
-  const f = input.files[0]; if(!f) return;
-  const reader = new FileReader();
-  reader.onload = function(e){
-    const st = document.getElementById('upload-status');
-    st.style.display = 'block'; st.style.color = 'var(--pine)';
-    st.textContent = 'Loaded: ' + f.name + ' \u2014 parsing...';
-    // TODO: parse YAML and pre-fill form fields
-    setTimeout(() => closeUpload(), 1500);
-  };
-  reader.readAsText(f);
-}
-
-const dz = document.getElementById('upload-dropzone');
-if(dz){
-  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
-  dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
-  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('dragover'); const f = e.dataTransfer.files[0]; if(f) handleUpload({files:[f]}); });
-}
+// ── Upload config overlay (real implementation below) ──
 
 // ── Student flow ──
 function validateStudentEmail(){
@@ -1652,10 +1637,9 @@ function autoFillAll(){
     const tbody=document.getElementById('kw-tbody');
     const empty=document.getElementById('kw-empty-row');if(empty)empty.remove();
     const kws=[['gyrochronology',9,'max','main interest',true],['rotation period',8,'high','main interest',false],['open clusters',8,'high','main interest',false],['stellar activity',7,'mid','interested',false],['photometry',3,'low','loosely follow',false]];
-    kws.forEach(([name,w,cls,label,chk])=>{
-      const tr=document.createElement('tr');
-      tr.innerHTML='<td class="kw-name">'+name+'</td><td><div class="kw-weight"><span class="kw-arrow">&#x25B2;</span><span class="kw-score">'+w+'</span><span class="kw-arrow">&#x25BC;</span></div><span class="kw-label '+cls+'">'+label+'</span></td><td style="text-align:center;"><input type="checkbox" '+(chk?'checked ':'')+' style="accent-color:var(--pine);width:14px;height:14px;"></td><td style="text-align:center;color:var(--warm-grey);cursor:pointer;">&times;</td>';
-      tbody.appendChild(tr);
+    kws.forEach(([name,w])=>{
+      state.keywords[name]=w;
+      tbody.appendChild(makeKwTableRow(name,w));
     });
   },1100);
   setTimeout(()=>{
@@ -1698,10 +1682,9 @@ function aiSuggestKeywords(){
   setTimeout(()=>{
     const empty=document.getElementById('kw-empty-row');if(empty)empty.remove();
     const kws=[['gyrochronology',9,'max','main interest',true],['rotation period',8,'high','main interest',false],['open clusters',8,'high','main interest',false],['stellar activity',7,'mid','interested',false],['photometry',3,'low','loosely follow',false]];
-    kws.forEach(([name,w,cls,label,chk])=>{
-      const tr=document.createElement('tr');
-      tr.innerHTML='<td class="kw-name">'+name+'</td><td><div class="kw-weight"><span class="kw-arrow">&#x25B2;</span><span class="kw-score">'+w+'</span><span class="kw-arrow">&#x25BC;</span></div><span class="kw-label '+cls+'">'+label+'</span></td><td style="text-align:center;"><input type="checkbox" '+(chk?'checked ':'')+' style="accent-color:var(--pine);width:14px;height:14px;"></td><td style="text-align:center;color:var(--warm-grey);cursor:pointer;">&times;</td>';
-      tbody.appendChild(tr);
+    kws.forEach(([name,w])=>{
+      state.keywords[name]=w;
+      tbody.appendChild(makeKwTableRow(name,w));
     });
     btn.textContent='AI suggest keywords';btn.style.opacity='1';
     document.getElementById('ai-clear-kw-btn').style.display='';
@@ -1714,21 +1697,7 @@ function clearAiKeywords(){
   document.getElementById('ai-clear-kw-btn').style.display='none';
   document.getElementById('ai-kw-status').style.display='none';
 }
-function aiSuggestPeople(){
-  const btn=document.getElementById('ai-suggest-people-btn'),st=document.getElementById('ai-people-status');
-  btn.textContent='Finding...';btn.style.opacity='.6';st.style.display='inline';st.textContent='Scanning publications...';
-  setTimeout(()=>{
-    document.getElementById('ai-people-results').style.display='block';
-    btn.textContent='Suggest from co-authors';btn.style.opacity='1';
-    st.textContent='14 found \u2014 click to add';
-  },800);
-}
 function aiSuggestColleagues(){aiSuggestPeople();}
-function clearColleagues(){
-  const chips=document.getElementById('coll-chips');
-  chips.innerHTML='<span class="chip chip-ghost">+ add person</span>';
-  const btn=document.getElementById('coll-clear-btn');if(btn)btn.style.display='none';
-}
 function setRadio(el){el.parentElement.querySelectorAll('.radio-option').forEach(o=>o.classList.remove('active'));el.classList.add('active');}
 function pickFreq(el,label){setRadio(el);document.getElementById('freq-label').textContent=label;setTimeout(()=>{document.getElementById('freq-picker').style.display='none';},200);}
 function toggleAdvanced(linkEl,targetId){const t=document.getElementById(targetId);const open=t.style.display!=='none';t.style.display=open?'none':'block';linkEl.innerHTML=linkEl.innerHTML.replace(open?'\u2191':'\u2193',open?'\u2193':'\u2191');}
@@ -1801,13 +1770,37 @@ function getCardLabel(){
 /* ── Upload overlay ── */
 function openUpload(){document.getElementById('upload-overlay').classList.add('show');}
 function closeUpload(){document.getElementById('upload-overlay').classList.remove('show');document.getElementById('upload-status').style.display='none';}
-function handleUpload(input){
-  const f=input.files[0];if(!f)return;
-  const st=document.getElementById('upload-status');
-  st.style.display='block';st.style.color='var(--pine)';
-  st.textContent='Loaded: '+f.name+' — filling in your settings...';
-  setTimeout(()=>{closeUpload();},1500);
+
+async function handleUpload(input){
+  const f = (input.files || [])[0]; if(!f) return;
+  const reader = new FileReader();
+  reader.onload = async function(e){
+    const st = document.getElementById('upload-status');
+    st.style.display = 'block'; st.style.color = 'var(--pine)';
+    st.textContent = 'Reading ' + f.name + '...';
+    try {
+      const resp = await fetch('/api/config/parse', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({yaml: e.target.result}),
+      });
+      const data = await resp.json();
+      if(data.error){ st.style.color = '#C0392B'; st.textContent = 'Error: ' + data.error; return; }
+      fillFromConfig(data);
+      const cats = (data.categories||[]).length;
+      const kws = Object.keys(data.keywords||{}).length;
+      const people = (data.colleagues_people||[]).length;
+      st.style.color = 'var(--pine)';
+      st.textContent = `Loaded! ${cats} categories, ${kws} keywords, ${people} people filled in.`;
+      setTimeout(()=>closeUpload(), 1800);
+    } catch(err){
+      st.style.color = '#C0392B';
+      st.textContent = 'Parse error — is this a valid config.yaml?';
+    }
+  };
+  reader.readAsText(f);
 }
+
 const dz=document.getElementById('upload-dropzone');
 if(dz){dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');const f=e.dataTransfer.files[0];if(f)handleUpload({files:[f]});});}
 
@@ -1864,6 +1857,144 @@ function stuSubscribe(){
       '\n  },\n  "confirmation_email_sent": true }</div>';
   },1200);
 }
+
+// ── Keyword table row factory ──
+function makeKwTableRow(name, weight) {
+  const w = Math.max(0, Math.min(10, parseInt(weight) || 7));
+  const cls = w <= 2 ? 'low' : w <= 5 ? 'mid' : w <= 8 ? 'high' : 'max';
+  const label = w <= 2 ? 'loosely follow' : w <= 5 ? 'interested' : w <= 8 ? 'main interest' : 'everything';
+  const tr = document.createElement('tr');
+  const safeN = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  tr.innerHTML = `<td class="kw-name">${name}</td><td><div class="kw-weight"><span class="kw-arrow" onclick="adjustWeight(this,1)">&#x25B2;</span><span class="kw-score">${w}</span><span class="kw-arrow" onclick="adjustWeight(this,-1)">&#x25BC;</span></div><span class="kw-label ${cls}">${label}</span></td><td style="text-align:center;"><input type="checkbox" style="accent-color:var(--pine);width:14px;height:14px;"></td><td style="text-align:center;color:var(--warm-grey);cursor:pointer;" onclick="removeKeyword(this,'${safeN}')">&times;</td>`;
+  return tr;
+}
+
+// ── Add keyword (manual entry) ──
+function addKeyword(value) {
+  const name = (value || '').trim().toLowerCase();
+  if(!name || state.keywords[name] !== undefined) return;
+  state.keywords[name] = 7;
+  // Chip
+  const kwChips = document.getElementById('kw-chips');
+  const ghost = kwChips.querySelector('.chip-ghost');
+  const chip = document.createElement('span');
+  chip.className = 'chip chip-pine';
+  const safeN = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  chip.innerHTML = `${name} <span class="remove" onclick="removeKeyword(this,'${safeN}')">&times;</span>`;
+  kwChips.insertBefore(chip, ghost);
+  // Table
+  const tbody = document.getElementById('kw-tbody');
+  const empty = document.getElementById('kw-empty-row');
+  if(empty) empty.remove();
+  tbody.appendChild(makeKwTableRow(name, 7));
+  const inp = document.getElementById('kw-input');
+  if(inp) inp.value = '';
+}
+
+// ── Add colleague (manual entry) ──
+function addColleagueManual(value) {
+  const name = (value || '').trim();
+  if(!name || state.colleagues.includes(name)) return;
+  state.colleagues.push(name);
+  const collChips = document.getElementById('coll-chips');
+  const ghost = collChips.querySelector('.chip-ghost');
+  const chip = document.createElement('span');
+  chip.className = 'chip chip-pine';
+  const safeN = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  chip.innerHTML = `${name} <span class="remove" onclick="removeColleague(this,'${safeN}')">&times;</span>`;
+  collChips.insertBefore(chip, ghost);
+  const clearBtn = document.getElementById('coll-clear-btn');
+  if(clearBtn) clearBtn.style.display = '';
+  const inp = document.getElementById('coll-input');
+  if(inp) inp.value = '';
+}
+
+// ── Category counter ──
+function updateCatCount(expander) {
+  if(!expander) return;
+  const total = expander.querySelectorAll('.chip').length;
+  const selected = expander.querySelectorAll('.chip-pine').length;
+  const countEl = expander.querySelector('.cat-count');
+  if(countEl) countEl.textContent = selected + '/' + total;
+}
+
+// ── Select all / clear a category group ──
+function selectAllCats(groupId) {
+  const group = document.getElementById(groupId); if(!group) return;
+  group.querySelectorAll('.chip-ghost').forEach(chip => {
+    const name = chip.textContent.trim();
+    selectCat(chip, name);
+  });
+}
+
+function clearGroupCats(groupId) {
+  const group = document.getElementById(groupId); if(!group) return;
+  group.querySelectorAll('.chip-pine').forEach(chip => {
+    const removeEl = chip.querySelector('.remove');
+    if(removeEl) unselectCat(removeEl);
+  });
+}
+
+// ── Wire all category chips on load ──
+function initCatChips() {
+  document.querySelectorAll('#cat-container .cat-expander-body .chip-ghost').forEach(chip => {
+    const name = chip.textContent.trim();
+    chip.onclick = () => selectCat(chip, name);
+  });
+  // Init counters
+  document.querySelectorAll('#cat-container .cat-expander').forEach(updateCatCount);
+}
+
+// ── Fill form from uploaded config ──
+function fillFromConfig(cfg) {
+  // Categories
+  if(Array.isArray(cfg.categories) && cfg.categories.length) {
+    // Clear existing
+    [...document.querySelectorAll('#cat-container .chip-pine')].forEach(chip => {
+      const removeEl = chip.querySelector('.remove');
+      if(removeEl) unselectCat(removeEl);
+    });
+    cfg.categories.forEach(cat => {
+      document.querySelectorAll('#cat-container .chip').forEach(chip => {
+        if(chip.textContent.trim() === cat && chip.classList.contains('chip-ghost')) {
+          const expander = chip.closest('.cat-expander');
+          if(expander && !expander.classList.contains('open')) expander.classList.add('open');
+          selectCat(chip, cat);
+        }
+      });
+    });
+  }
+  // Keywords
+  const kws = cfg.keywords || {};
+  if(Object.keys(kws).length) {
+    state.keywords = {};
+    const kwChips = document.getElementById('kw-chips');
+    kwChips.querySelectorAll('.chip-pine').forEach(c => c.remove());
+    const tbody = document.getElementById('kw-tbody');
+    document.getElementById('kw-empty-row')?.remove();
+    tbody.innerHTML = '';
+    Object.entries(kws).forEach(([name, weight]) => {
+      state.keywords[name] = weight;
+      const ghost = kwChips.querySelector('.chip-ghost');
+      const chip = document.createElement('span');
+      chip.className = 'chip chip-pine';
+      const safeN = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+      chip.innerHTML = `${name} <span class="remove" onclick="removeKeyword(this,'${safeN}')">&times;</span>`;
+      kwChips.insertBefore(chip, ghost);
+      tbody.appendChild(makeKwTableRow(name, weight));
+    });
+  }
+  // Colleagues
+  if(Array.isArray(cfg.colleagues_people) && cfg.colleagues_people.length) {
+    clearColleagues();
+    cfg.colleagues_people.forEach(name => addColleagueManual(name));
+  }
+  updateStepSummary('step-2');
+  updateStepSummary('step-3');
+}
+
+// ── Init on load ──
+initCatChips();
 
 </script>
 

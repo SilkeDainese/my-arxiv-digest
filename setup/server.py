@@ -510,6 +510,48 @@ def config_generate():
 
 
 # ─────────────────────────────────────────────────────────────
+#  Routes — Config parse (upload)
+# ─────────────────────────────────────────────────────────────
+
+
+@app.route("/api/config/parse", methods=["POST"])
+def config_parse():
+    """Parse an uploaded config.yaml and return form-friendly fields."""
+    data = request.get_json(force=True)
+    raw = data.get("yaml", "")
+    if not raw.strip():
+        return jsonify({"error": "Empty file"}), 400
+    try:
+        cfg = yaml.safe_load(raw)
+    except yaml.YAMLError as exc:
+        return jsonify({"error": f"Invalid YAML: {exc}"}), 400
+    if not isinstance(cfg, dict):
+        return jsonify({"error": "Not a valid config.yaml (expected a mapping at the top level)"}), 400
+
+    colleagues = cfg.get("colleagues", {})
+    colleagues_people: list[str] = []
+    if isinstance(colleagues, dict):
+        colleagues_people = colleagues.get("people", []) or []
+    elif isinstance(colleagues, list):
+        colleagues_people = colleagues
+
+    return jsonify({
+        "researcher_name": cfg.get("researcher_name", ""),
+        "research_context": cfg.get("research_context", ""),
+        "categories": cfg.get("categories") or [],
+        "keywords": cfg.get("keywords") or {},
+        "colleagues_people": colleagues_people,
+        "self_match": cfg.get("self_match") or [],
+        "digest_mode": cfg.get("digest_mode", "highlights"),
+        "recipient_view_mode": cfg.get("recipient_view_mode", "deep_read"),
+        "schedule": cfg.get("schedule", "mon_wed_fri"),
+        "digest_name": cfg.get("digest_name", ""),
+        "institution": cfg.get("institution", ""),
+        "tagline": cfg.get("tagline", ""),
+    })
+
+
+# ─────────────────────────────────────────────────────────────
 #  Routes — Invite codes
 # ─────────────────────────────────────────────────────────────
 
