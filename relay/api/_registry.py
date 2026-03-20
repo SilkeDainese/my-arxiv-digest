@@ -7,10 +7,13 @@ the minimal subset needed by the API endpoints.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
+import json
 import os
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -76,90 +79,6 @@ def clamp_max_papers(value: Any) -> int:
     return max(MIN_MAX_PAPERS, min(MAX_MAX_PAPERS, parsed))
 
 
-def _preferred_password_scheme() -> str:
-    return "scrypt" if hasattr(hashlib, "scrypt") else "pbkdf2_sha256"
-
-
-_SCRYPT_N, _SCRYPT_R, _SCRYPT_P = 2**16, 8, 1
-_PBKDF2_ITERATIONS = 600_000
-
-
-def hash_password(password: str, *, salt_hex: str | None = None) -> tuple[str, str]:
-    """Hash a password, returning (salt_hex, hash_str).
-
-    Format: scheme$params$hex — params embedded for future-proof verification.
-    Falls back to pbkdf2 if scrypt fails at runtime (OpenSSL 3.x memory limits).
-    """
-    if not password:
-        raise ValueError("Password is required.")
-    salt = bytes.fromhex(salt_hex) if salt_hex else os.urandom(16)
-    scheme = _preferred_password_scheme()
-    if scheme == "scrypt":
-        try:
-            digest = hashlib.scrypt(
-                password.encode("utf-8"), salt=salt,
-                n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P,
-            )
-            params = f"n={_SCRYPT_N},r={_SCRYPT_R},p={_SCRYPT_P}"
-            return salt.hex(), f"{scheme}${params}${digest.hex()}"
-        except (ValueError, OSError):
-            scheme = "pbkdf2_sha256"
-    digest = hashlib.pbkdf2_hmac(
-        "sha256", password.encode("utf-8"), salt, _PBKDF2_ITERATIONS,
-    )
-    params = f"iter={_PBKDF2_ITERATIONS}"
-    return salt.hex(), f"{scheme}${params}${digest.hex()}"
-
-
-def verify_password(password: str, salt_hex: str, digest_hex: str) -> bool:
-    """Return True when the password matches the stored hash.
-
-    Handles both new 3-part format (scheme$params$hex) and legacy 2-part
-    format (scheme$hex) for backward compatibility.
-    """
-    if not password or not salt_hex or not digest_hex:
-        return False
-    parts = digest_hex.split("$")
-    salt = bytes.fromhex(salt_hex)
-
-    if len(parts) == 3:
-        scheme, params_str, stored_hex = parts
-        params = dict(kv.split("=") for kv in params_str.split(","))
-        if scheme == "scrypt" and hasattr(hashlib, "scrypt"):
-            n, r, p = int(params["n"]), int(params["r"]), int(params["p"])
-            try:
-                candidate = hashlib.scrypt(
-                    password.encode("utf-8"), salt=salt, n=n, r=r, p=p,
-                ).hex()
-            except (ValueError, OSError):
-                return False
-        else:
-            iters = int(params.get("iter", _PBKDF2_ITERATIONS))
-            candidate = hashlib.pbkdf2_hmac(
-                "sha256", password.encode("utf-8"), salt, iters,
-            ).hex()
-            scheme = "pbkdf2_sha256"
-    else:
-        # Legacy format: scheme$hex
-        scheme = parts[0] if len(parts) >= 1 else ""
-        stored_hex = parts[-1]
-        if scheme == "scrypt" and hasattr(hashlib, "scrypt"):
-            try:
-                candidate = hashlib.scrypt(
-                    password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1,
-                ).hex()
-            except (ValueError, OSError):
-                return False
-        else:
-            candidate = hashlib.pbkdf2_hmac(
-                "sha256", password.encode("utf-8"), salt, 200_000,
-            ).hex()
-            scheme = "pbkdf2_sha256"
-
-    return hmac.compare_digest(
-        f"{scheme}${stored_hex}", f"{scheme}${candidate}",
-    )
-
 
 def public_record(record: dict[str, Any]) -> dict[str, Any]:
     normalized = normalise_public_subscription(record)
@@ -188,42 +107,123 @@ def normalise_public_subscription(record: dict[str, Any]) -> dict[str, Any]:
 def build_student_record(
     *,
     email: str,
-    password: str,
-    new_password: str | None = None,
     package_ids: Any,
     max_papers_per_week: Any,
     existing: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Create or update a student subscription record (passwordless)."""
     clean_email = normalise_email(email)
     if not clean_email:
         raise ValueError("Email is required.")
     packages = normalise_package_ids(package_ids)
     max_papers = clamp_max_papers(max_papers_per_week)
-    replacement_password = str(new_password or "").strip()
     timestamp = now_iso()
-
-    if existing:
-        salt_hex = str(existing.get("password_salt", "")).strip()
-        digest_hex = str(existing.get("password_hash", "")).strip()
-        if not verify_password(password, salt_hex, digest_hex):
-            raise PermissionError("Incorrect password.")
-        if replacement_password:
-            password_salt, password_hash = hash_password(replacement_password)
-        else:
-            password_salt = salt_hex
-            password_hash = digest_hex
-        created_at = existing.get("created_at") or timestamp
-    else:
-        password_salt, password_hash = hash_password(password)
-        created_at = timestamp
+    created_at = (existing.get("created_at") or timestamp) if existing else timestamp
 
     return {
         "email": clean_email,
         "package_ids": packages,
         "max_papers_per_week": max_papers,
         "active": True,
-        "password_salt": password_salt,
-        "password_hash": password_hash,
         "created_at": created_at,
         "updated_at": timestamp,
     }
+
+
+# ─────── Confirmation token system ───────────────────────────
+
+_TOKEN_DEFAULT_TTL = 3600  # 1 hour
+_RATE_LIMIT_SECONDS = 15 * 60  # 15 minutes
+
+
+def generate_confirmation_token(
+    email: str,
+    action: str,
+    payload: dict[str, Any],
+    secret: str,
+    *,
+    ttl_seconds: int = _TOKEN_DEFAULT_TTL,
+) -> str:
+    """Create an HMAC-signed URL-safe confirmation token (stdlib only)."""
+    data = {
+        "email": email,
+        "action": action,
+        "payload": payload,
+        "expires_at": time.time() + ttl_seconds,
+        "nonce": os.urandom(8).hex(),
+    }
+    data_bytes = json.dumps(data, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    data_b64 = base64.urlsafe_b64encode(data_bytes).decode("ascii")
+    sig = hmac.new(secret.encode("utf-8"), data_bytes, hashlib.sha256).digest()
+    sig_b64 = base64.urlsafe_b64encode(sig).decode("ascii")
+    return f"{data_b64}.{sig_b64}"
+
+
+def validate_confirmation_token(token: str, secret: str) -> dict[str, Any]:
+    """Decode and verify an HMAC-signed confirmation token.
+
+    Raises ValueError on invalid, tampered, or expired tokens.
+    """
+    try:
+        parts = token.split(".", 1)
+        if len(parts) != 2:
+            raise ValueError("Invalid token format.")
+        data_b64, sig_b64 = parts
+        data_bytes = base64.urlsafe_b64decode(data_b64)
+        expected_sig = hmac.new(
+            secret.encode("utf-8"), data_bytes, hashlib.sha256,
+        ).digest()
+        actual_sig = base64.urlsafe_b64decode(sig_b64)
+        if not hmac.compare_digest(expected_sig, actual_sig):
+            raise ValueError("Invalid token signature.")
+        data = json.loads(data_bytes)
+    except (ValueError, json.JSONDecodeError) as exc:
+        if "expired" in str(exc).lower() or "invalid" in str(exc).lower():
+            raise
+        raise ValueError("Invalid token.") from exc
+
+    if data.get("expires_at", 0) < time.time():
+        raise ValueError("Token has expired.")
+    return data
+
+
+def store_pending_token(
+    pending: dict[str, Any], email: str, action: str, token: str,
+) -> None:
+    """Record a pending token for rate-limit tracking."""
+    key = f"{email}:{action}"
+    # Decode to get expiry
+    try:
+        data = json.loads(base64.urlsafe_b64decode(token.split(".")[0]))
+        expires_at = data.get("expires_at", time.time() + _TOKEN_DEFAULT_TTL)
+    except Exception:
+        expires_at = time.time() + _TOKEN_DEFAULT_TTL
+    pending[key] = {
+        "token": token,
+        "created_at": time.time(),
+        "expires_at": expires_at,
+    }
+
+
+def check_rate_limit(
+    pending: dict[str, Any], email: str, action: str,
+) -> None:
+    """Raise ValueError if a recent confirmation was already sent."""
+    key = f"{email}:{action}"
+    entry = pending.get(key)
+    if entry and (time.time() - entry["created_at"]) < _RATE_LIMIT_SECONDS:
+        raise ValueError(
+            "A recent confirmation was already sent. "
+            "Please check your email or wait 15 minutes."
+        )
+
+
+def cleanup_expired_tokens(pending: dict[str, Any]) -> None:
+    """Remove expired entries from the pending tokens dict."""
+    now = time.time()
+    expired_keys = [
+        key for key, entry in pending.items()
+        if entry.get("expires_at", 0) < now
+    ]
+    for key in expired_keys:
+        del pending[key]

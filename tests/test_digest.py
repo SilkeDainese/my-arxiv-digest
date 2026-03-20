@@ -1487,3 +1487,70 @@ class TestSendViaSmtp:
         assert result is False
         captured = capsys.readouterr()
         assert "Email send failed" in captured.out
+
+
+# ─────────────────────────────────────────────────────────────
+#  AU researcher detection
+# ─────────────────────────────────────────────────────────────
+
+
+class TestDetectAUResearchers:
+    """detect_au_researchers flags papers with Aarhus University affiliations."""
+
+    def test_au_affiliation_flagged(self):
+        papers = [
+            make_paper(
+                id="au-paper",
+                author_affiliations={"Smith, J.": ["Aarhus University"]},
+            ),
+        ]
+        d.detect_au_researchers(papers)
+        assert papers[0]["is_au_researcher"] is True
+        assert "Smith, J." in papers[0]["au_researcher_authors"]
+
+    def test_non_au_affiliation_not_flagged(self):
+        papers = [
+            make_paper(
+                id="other-paper",
+                author_affiliations={"Jones, A.": ["MIT"]},
+            ),
+        ]
+        d.detect_au_researchers(papers)
+        assert papers[0]["is_au_researcher"] is False
+        assert papers[0]["au_researcher_authors"] == []
+
+    def test_no_affiliations_not_flagged(self):
+        papers = [make_paper(id="no-aff")]
+        d.detect_au_researchers(papers)
+        assert papers[0]["is_au_researcher"] is False
+
+    def test_au_variant_detected(self):
+        """Catches 'Aarhus Uni' and 'AU, Denmark' variants."""
+        papers = [
+            make_paper(
+                id="variant-1",
+                author_affiliations={"A": ["Aarhus Uni"]},
+            ),
+            make_paper(
+                id="variant-2",
+                author_affiliations={"B": ["AU, Denmark"]},
+            ),
+        ]
+        d.detect_au_researchers(papers)
+        assert papers[0]["is_au_researcher"] is True
+        assert papers[1]["is_au_researcher"] is True
+
+    def test_multiple_au_authors(self):
+        papers = [
+            make_paper(
+                id="multi-au",
+                author_affiliations={
+                    "Smith, J.": ["Aarhus University"],
+                    "Jones, A.": ["MIT"],
+                    "Doe, B.": ["Aarhus University", "Niels Bohr Institute"],
+                },
+            ),
+        ]
+        d.detect_au_researchers(papers)
+        assert papers[0]["is_au_researcher"] is True
+        assert set(papers[0]["au_researcher_authors"]) == {"Smith, J.", "Doe, B."}

@@ -13,7 +13,6 @@ from student_registry import (
     normalise_package_ids,
     normalise_public_subscription,
     public_record,
-    verify_password,
 )
 
 
@@ -34,10 +33,9 @@ def make_paper(**overrides):
     return paper
 
 
-def test_build_student_record_hashes_and_verifies_password():
+def test_build_student_record_creates_passwordless_record():
     record = build_student_record(
         email="Student@Example.com",
-        password="secret-password",
         package_ids=["exoplanets", "galaxies"],
         max_papers_per_week=9,
     )
@@ -45,21 +43,20 @@ def test_build_student_record_hashes_and_verifies_password():
     assert record["email"] == "student@example.com"
     assert record["package_ids"] == ["exoplanets", "galaxies"]
     assert record["max_papers_per_week"] == 9
-    assert verify_password("secret-password", record["password_salt"], record["password_hash"])
-    assert not verify_password("wrong-password", record["password_salt"], record["password_hash"])
+    assert record["active"] is True
+    assert "password_salt" not in record
+    assert "password_hash" not in record
 
 
-def test_build_student_record_requires_correct_password_for_updates():
+def test_build_student_record_updates_existing():
     original = build_student_record(
         email="student@example.com",
-        password="secret-password",
         package_ids=["exoplanets"],
         max_papers_per_week=6,
     )
 
     updated = build_student_record(
         email="student@example.com",
-        password="secret-password",
         package_ids=["stars", "galaxies"],
         max_papers_per_week=4,
         existing=original,
@@ -67,27 +64,7 @@ def test_build_student_record_requires_correct_password_for_updates():
 
     assert updated["package_ids"] == ["stars", "galaxies"]
     assert updated["max_papers_per_week"] == 4
-
-
-def test_build_student_record_can_rotate_password():
-    original = build_student_record(
-        email="student@example.com",
-        password="old-password",
-        package_ids=["exoplanets"],
-        max_papers_per_week=6,
-    )
-
-    updated = build_student_record(
-        email="student@example.com",
-        password="old-password",
-        new_password="new-password",
-        package_ids=["stars"],
-        max_papers_per_week=5,
-        existing=original,
-    )
-
-    assert verify_password("new-password", updated["password_salt"], updated["password_hash"])
-    assert not verify_password("old-password", updated["password_salt"], updated["password_hash"])
+    assert updated["created_at"] == original["created_at"]
 
 
 def test_normalise_package_ids_rejects_empty():
@@ -162,7 +139,6 @@ def test_make_student_digest_config_manage_url_has_no_stale_packages():
 def test_public_record_strips_sensitive_fields():
     record = build_student_record(
         email="student@example.com",
-        password="secret-password",
         package_ids=["galaxies"],
         max_papers_per_week=5,
     )
@@ -171,6 +147,24 @@ def test_public_record_strips_sensitive_fields():
 
     assert "password_hash" not in public
     assert "password_salt" not in public
+
+
+def test_public_record_handles_legacy_password_fields():
+    """Old records with password fields are loaded gracefully."""
+    legacy = {
+        "email": "student@example.com",
+        "package_ids": ["galaxies"],
+        "max_papers_per_week": 5,
+        "active": True,
+        "password_salt": "aabb",
+        "password_hash": "scrypt$n=65536,r=8,p=1$deadbeef",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    public = public_record(legacy)
+    assert public["email"] == "student@example.com"
+    assert "password_salt" not in public
+    assert "password_hash" not in public
 
 
 def test_normalise_public_subscription_clamps_and_validates():
@@ -248,6 +242,7 @@ def test_footer_uses_student_manage_links_when_present():
         "gemini",
     )
 
+    assert "Change settings" in footer
     assert "Change packages" in footer
     assert "Manage subscription" in footer
     assert "Unsubscribe" in footer

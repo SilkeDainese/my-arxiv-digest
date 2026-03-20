@@ -17,6 +17,7 @@ from typing import Any
 from digest import (
     analyse_papers,
     apply_feedback_bias,
+    detect_au_researchers,
     fetch_arxiv_papers,
     ingest_feedback_from_github,
     pre_filter,
@@ -326,6 +327,7 @@ def main(argv: list[str] | None = None) -> int:
     print("\n🤖 Analysing shared AU student pool...")
     ranked_papers, scoring_method = analyse_papers(candidates, base_config)
     annotate_student_packages(ranked_papers)
+    detect_au_researchers(ranked_papers)
     apply_aggregate_expert_signal(ranked_papers, aggregated)
     print(f"   {len(ranked_papers)} papers available for student selection ({scoring_method})")
 

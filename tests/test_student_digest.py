@@ -27,8 +27,6 @@ class TestStudentZeroPaperGuard:
         "active": True,
         "package_ids": ["exoplanets"],
         "max_papers_per_week": 6,
-        "password_hash": "x",
-        "password_salt": "y",
         "created_at": "2025-01-01",
         "manage_url": "https://example.com",
     }

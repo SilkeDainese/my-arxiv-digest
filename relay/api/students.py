@@ -1,4 +1,9 @@
-"""Central student subscription management API for AU student digests."""
+"""Central student subscription management API for AU student digests.
+
+Passwordless design: every state-changing action (subscribe, change settings,
+unsubscribe) sends a confirmation email to the AU inbox. Clicking the
+confirmation link completes the action. The AU email IS the authentication.
+"""
 
 from __future__ import annotations
 
@@ -31,7 +36,12 @@ normalise_email = _registry.normalise_email
 normalise_package_ids = _registry.normalise_package_ids
 package_labels = _registry.package_labels
 public_record = _registry.public_record
-verify_password = _registry.verify_password
+generate_confirmation_token = _registry.generate_confirmation_token
+validate_confirmation_token = _registry.validate_confirmation_token
+store_pending_token = _registry.store_pending_token
+check_rate_limit = _registry.check_rate_limit
+cleanup_expired_tokens = _registry.cleanup_expired_tokens
+AU_STUDENT_TRACK_LABELS = _registry.AU_STUDENT_TRACK_LABELS
 
 GITHUB_API = "https://api.github.com"
 STORAGE_GITHUB_TOKEN = os.environ.get("STUDENT_STORAGE_GITHUB_TOKEN", "").strip()
@@ -39,12 +49,22 @@ STORAGE_REPO = os.environ.get("STUDENT_STORAGE_REPO", "").strip()
 STORAGE_PATH = os.environ.get("STUDENT_STORAGE_PATH", "students/subscriptions.json").strip()
 STORAGE_BRANCH = os.environ.get("STUDENT_STORAGE_BRANCH", "main").strip()
 STUDENT_ADMIN_TOKEN = os.environ.get("STUDENT_ADMIN_TOKEN", "").strip()
+STUDENT_TOKEN_SECRET = os.environ.get("STUDENT_TOKEN_SECRET", "").strip()
 SMTP_USER = os.environ.get("SMTP_USER", "").strip()
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "").strip()
 PUBLIC_STUDENT_MANAGE_URL = os.environ.get(
     "PUBLIC_STUDENT_MANAGE_URL",
     "https://arxiv-digest-relay.vercel.app/api/students",
 ).strip()
+
+# ─────── Brand constants (synced from brand.py) ──────────────
+# Cannot import brand.py because relay deploys from relay/ as root.
+_PINE = "#2F4F3E"
+_GOLD = "#EBC944"
+_ASH_WHITE = "#F6F5F2"
+_CHARCOAL = "#1F1F1F"
+_WARM_GREY = "#6A6A66"
+_ALERT_RED = "#C0392B"
 
 
 def _github_request(method: str, url: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -78,7 +98,7 @@ def _load_registry() -> tuple[dict[str, Any], str | None]:
         data = _github_request("GET", url)
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
-            return {"students": {}}, None
+            return {"students": {}, "pending_tokens": {}}, None
         raise
 
     content = base64.b64decode(data["content"]).decode("utf-8")
@@ -86,6 +106,8 @@ def _load_registry() -> tuple[dict[str, Any], str | None]:
     if not isinstance(registry, dict):
         registry = {}
     registry.setdefault("students", {})
+    registry.setdefault("pending_tokens", {})
+    cleanup_expired_tokens(registry["pending_tokens"])
     return registry, data.get("sha")
 
 
@@ -117,47 +139,110 @@ def _build_manage_url(email: str) -> str:
     )
 
 
-def _send_subscription_confirmation(
-    subscription: dict[str, Any],
-    *,
-    event: str,
+def _build_confirm_url(token: str) -> str:
+    """Return the public confirmation URL for a token."""
+    return (
+        f"{PUBLIC_STUDENT_MANAGE_URL.rstrip('?')}"
+        f"?{urllib.parse.urlencode({'action': 'confirm', 'token': token})}"
+    )
+
+
+# ─────── Email sending ───────────────────────────────────────
+
+def _send_subscribe_confirmation(
+    email: str, token: str, package_ids: list[str],
 ) -> tuple[bool, str | None]:
-    """Send an immediate confirmation email for a new or reactivated subscription."""
+    """Send a confirmation email for a new or updated subscription."""
     if not SMTP_USER or not SMTP_PASSWORD:
         return False, "confirmation mail is not configured on the relay"
 
-    email = subscription["email"]
-    package_text = ", ".join(package_labels()[package_id] for package_id in subscription["package_ids"])
-    manage_url = _build_manage_url(email)
-    action_text = (
-        "Your AU student digest subscription is active again."
-        if event == "resubscribed"
-        else "Your AU student digest subscription is active."
+    confirm_url = _build_confirm_url(token)
+    package_text = ", ".join(
+        package_labels().get(pid, pid) for pid in package_ids
     )
-    subject = "AU student digest subscription confirmed"
+    subject = "Confirm your AU student digest subscription"
     plain_text = (
-        f"{action_text}\n\n"
-        f"Email: {email}\n"
-        f"Packages: {package_text}\n"
-        f"Max papers per week: {subscription['max_papers_per_week']}\n\n"
-        f"Manage your subscription: {manage_url}\n"
+        f"Confirm your subscription\n\n"
+        f"Click the link below to activate your AU student digest:\n"
+        f"{confirm_url}\n\n"
+        f"Your packages: {package_text}\n\n"
+        f"If you didn't request this, you can safely ignore this email.\n"
     )
     html_body = f"""<!doctype html>
 <html lang="en">
-  <body style="font-family:Arial,sans-serif;color:#1f2933;line-height:1.6">
-    <h2 style="margin:0 0 12px">AU student digest subscription confirmed</h2>
-    <p>{html.escape(action_text)}</p>
-    <p><strong>Email:</strong> {html.escape(email)}<br>
-       <strong>Packages:</strong> {html.escape(package_text)}<br>
-       <strong>Max papers per week:</strong> {subscription['max_papers_per_week']}</p>
-    <p><a href="{html.escape(manage_url)}">Manage your subscription</a></p>
+  <body style="margin:0;padding:0;background:{_ASH_WHITE};font-family:'IBM Plex Sans',Helvetica,Arial,sans-serif">
+    <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto">
+      <tr><td style="background:{_PINE};padding:20px 28px">
+        <div style="font-family:'DM Serif Display',Georgia,serif;font-size:20px;color:white">AU student digest</div>
+      </td></tr>
+      <tr><td style="background:white;padding:32px 28px">
+        <h1 style="font-family:'DM Serif Display',Georgia,serif;font-size:24px;color:{_CHARCOAL};margin:0 0 16px">Confirm your subscription</h1>
+        <p style="font-size:15px;color:{_CHARCOAL};line-height:1.6;margin:0 0 24px">
+          Click the button below to activate your weekly arXiv digest.
+        </p>
+        <a href="{html.escape(confirm_url)}" style="display:inline-block;background:{_PINE};color:white;font-size:15px;font-weight:600;padding:12px 32px;border-radius:8px;text-decoration:none">Confirm subscription</a>
+        <div style="margin-top:24px;padding:16px;background:#F8F7F4;border-radius:8px">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:{_WARM_GREY};margin-bottom:8px">YOUR PACKAGES</div>
+          <div style="font-size:14px;color:{_CHARCOAL}">{html.escape(package_text)}</div>
+        </div>
+        <p style="font-size:13px;color:{_WARM_GREY};margin-top:24px;line-height:1.5">
+          If you didn't request this, you can safely ignore this email. The link expires in 1 hour.
+        </p>
+      </td></tr>
+    </table>
   </body>
 </html>"""
 
+    return _send_email(email, subject, plain_text, html_body)
+
+
+def _send_unsubscribe_confirmation(
+    email: str, token: str,
+) -> tuple[bool, str | None]:
+    """Send a confirmation email for unsubscribing."""
+    if not SMTP_USER or not SMTP_PASSWORD:
+        return False, "confirmation mail is not configured on the relay"
+
+    confirm_url = _build_confirm_url(token)
+    subject = "Confirm unsubscribe from AU student digest"
+    plain_text = (
+        f"Confirm unsubscribe\n\n"
+        f"Click the link below to unsubscribe from the AU student digest:\n"
+        f"{confirm_url}\n\n"
+        f"If you didn't request this, you can safely ignore this email.\n"
+    )
+    html_body = f"""<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:{_ASH_WHITE};font-family:'IBM Plex Sans',Helvetica,Arial,sans-serif">
+    <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto">
+      <tr><td style="background:{_PINE};padding:20px 28px">
+        <div style="font-family:'DM Serif Display',Georgia,serif;font-size:20px;color:white">AU student digest</div>
+      </td></tr>
+      <tr><td style="background:white;padding:32px 28px">
+        <h1 style="font-family:'DM Serif Display',Georgia,serif;font-size:24px;color:{_CHARCOAL};margin:0 0 16px">Confirm unsubscribe</h1>
+        <p style="font-size:15px;color:{_CHARCOAL};line-height:1.6;margin:0 0 24px">
+          Click the button below to stop receiving your weekly arXiv digest.
+        </p>
+        <a href="{html.escape(confirm_url)}" style="display:inline-block;background:{_ALERT_RED};color:white;font-size:15px;font-weight:600;padding:12px 32px;border-radius:8px;text-decoration:none">Confirm unsubscribe</a>
+        <p style="font-size:13px;color:{_WARM_GREY};margin-top:24px;line-height:1.5">
+          If you didn't request this, you can safely ignore this email. The link expires in 1 hour.
+        </p>
+      </td></tr>
+    </table>
+  </body>
+</html>"""
+
+    return _send_email(email, subject, plain_text, html_body)
+
+
+def _send_email(
+    to: str, subject: str, plain_text: str, html_body: str,
+) -> tuple[bool, str | None]:
+    """Send a multipart email via Gmail SMTP."""
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = f"arXiv Digest <{SMTP_USER}>"
-    msg["To"] = email
+    msg["To"] = to
     msg.attach(MIMEText(plain_text, "plain", "utf-8"))
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
@@ -167,7 +252,7 @@ def _send_subscription_confirmation(
             server.starttls()
             server.ehlo()
             server.login(SMTP_USER, SMTP_PASSWORD)
-            server.sendmail(SMTP_USER, [email], msg.as_bytes())
+            server.sendmail(SMTP_USER, [to], msg.as_bytes())
         return True, None
     except smtplib.SMTPAuthenticationError:
         return False, "relay SMTP authentication failed"
@@ -175,71 +260,110 @@ def _send_subscription_confirmation(
         return False, str(exc)
 
 
-def _handle_upsert(body: dict[str, Any]) -> dict[str, Any]:
+# ─────── API handlers ────────────────────────────────────────
+
+def _handle_request_subscribe(body: dict[str, Any]) -> dict[str, Any]:
+    """Validate subscription request and send confirmation email."""
     email = normalise_email(body.get("email", ""))
+    package_ids = normalise_package_ids(body.get("package_ids", []))
+    max_papers = clamp_max_papers(body.get("max_papers_per_week", DEFAULT_MAX_PAPERS))
+
+    if not STUDENT_TOKEN_SECRET:
+        raise RuntimeError("Token secret not configured.")
+
     registry, sha = _load_registry()
-    existing = registry["students"].get(email)
-    is_reactivation = bool(existing) and not bool(existing.get("active", True))
-    is_new_subscription = existing is None
-    record = build_student_record(
-        email=email,
-        password=str(body.get("password", "")),
-        new_password=str(body.get("new_password", "")),
-        package_ids=body.get("package_ids", []),
-        max_papers_per_week=body.get("max_papers_per_week", DEFAULT_MAX_PAPERS),
-        existing=existing,
-    )
-    registry["students"][email] = record
-    _save_registry(registry, sha, f"Update student subscription for {email}")
-    subscription = public_record(record)
+    pending = registry.get("pending_tokens", {})
 
-    confirmation_sent = False
-    confirmation_error: str | None = None
-    subscription_event = "created" if is_new_subscription else "updated"
-    if is_reactivation:
-        subscription_event = "resubscribed"
+    check_rate_limit(pending, email, "subscribe")
 
-    if is_new_subscription or is_reactivation:
-        confirmation_sent, confirmation_error = _send_subscription_confirmation(
-            subscription,
-            event=subscription_event,
-        )
+    payload = {"package_ids": package_ids, "max_papers_per_week": max_papers}
+    token = generate_confirmation_token(email, "subscribe", payload, STUDENT_TOKEN_SECRET)
+    store_pending_token(pending, email, "subscribe", token)
+    registry["pending_tokens"] = pending
+    _save_registry(registry, sha, f"Pending subscribe confirmation for {email}")
+
+    sent, err = _send_subscribe_confirmation(email, token, package_ids)
 
     return {
         "ok": True,
-        "subscription": subscription,
-        "package_labels": package_labels(),
-        "subscription_event": subscription_event,
-        "confirmation_email_sent": confirmation_sent,
-        "confirmation_email_error": confirmation_error,
+        "confirmation_sent": sent,
+        "confirmation_error": err,
     }
 
 
-def _handle_get(body: dict[str, Any]) -> dict[str, Any]:
+def _handle_request_unsubscribe(body: dict[str, Any]) -> dict[str, Any]:
+    """Validate unsubscribe request and send confirmation email."""
     email = normalise_email(body.get("email", ""))
-    registry, _ = _load_registry()
-    record = registry["students"].get(email)
-    if not record:
-        raise FileNotFoundError("Subscription not found.")
-    if not verify_password(str(body.get("password", "")), record.get("password_salt", ""), record.get("password_hash", "")):
-        raise PermissionError("Incorrect password.")
-    return {"ok": True, "subscription": public_record(record), "package_labels": package_labels()}
 
+    if not STUDENT_TOKEN_SECRET:
+        raise RuntimeError("Token secret not configured.")
 
-def _handle_unsubscribe(body: dict[str, Any]) -> dict[str, Any]:
-    email = normalise_email(body.get("email", ""))
     registry, sha = _load_registry()
-    record = registry["students"].get(email)
-    if not record:
-        raise FileNotFoundError("Subscription not found.")
-    if not verify_password(str(body.get("password", "")), record.get("password_salt", ""), record.get("password_hash", "")):
-        raise PermissionError("Incorrect password.")
-    record = dict(record)
-    record["active"] = False
-    record["updated_at"] = now_iso()
-    registry["students"][email] = record
-    _save_registry(registry, sha, f"Unsubscribe student {email}")
-    return {"ok": True, "subscription": public_record(record), "package_labels": package_labels()}
+    pending = registry.get("pending_tokens", {})
+
+    check_rate_limit(pending, email, "unsubscribe")
+
+    token = generate_confirmation_token(email, "unsubscribe", {}, STUDENT_TOKEN_SECRET)
+    store_pending_token(pending, email, "unsubscribe", token)
+    registry["pending_tokens"] = pending
+    _save_registry(registry, sha, f"Pending unsubscribe confirmation for {email}")
+
+    sent, err = _send_unsubscribe_confirmation(email, token)
+
+    return {
+        "ok": True,
+        "confirmation_sent": sent,
+        "confirmation_error": err,
+    }
+
+
+def _handle_confirm(token_str: str) -> tuple[str, str]:
+    """Validate token and execute the confirmed action.
+
+    Returns (html_page, content_type) for the GET response.
+    """
+    if not STUDENT_TOKEN_SECRET:
+        return _token_error_page("Token verification is not configured."), "text/html"
+
+    try:
+        data = validate_confirmation_token(token_str, STUDENT_TOKEN_SECRET)
+    except ValueError as exc:
+        return _token_error_page(str(exc)), "text/html"
+
+    email = data["email"]
+    action = data["action"]
+    payload = data.get("payload", {})
+
+    registry, sha = _load_registry()
+
+    if action == "subscribe":
+        existing = registry["students"].get(email)
+        record = build_student_record(
+            email=email,
+            package_ids=payload.get("package_ids", []),
+            max_papers_per_week=payload.get("max_papers_per_week", DEFAULT_MAX_PAPERS),
+            existing=existing,
+        )
+        registry["students"][email] = record
+        # Clean up pending token
+        pending = registry.get("pending_tokens", {})
+        pending.pop(f"{email}:subscribe", None)
+        _save_registry(registry, sha, f"Confirmed subscription for {email}")
+        return _subscribe_success_page(public_record(record)), "text/html"
+
+    elif action == "unsubscribe":
+        record = registry["students"].get(email)
+        if record:
+            record = dict(record)
+            record["active"] = False
+            record["updated_at"] = now_iso()
+            registry["students"][email] = record
+        pending = registry.get("pending_tokens", {})
+        pending.pop(f"{email}:unsubscribe", None)
+        _save_registry(registry, sha, f"Confirmed unsubscribe for {email}")
+        return _unsubscribe_success_page(), "text/html"
+
+    return _token_error_page("Unknown action."), "text/html"
 
 
 def _handle_admin_list(body: dict[str, Any]) -> dict[str, Any]:
@@ -254,39 +378,101 @@ def _handle_admin_list(body: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "subscriptions": students, "package_labels": package_labels()}
 
 
-def _handle_resend_confirmation(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-    """Re-send the confirmation email for an existing subscription."""
-    email = normalise_email(body.get("email", ""))
-    registry, _ = _load_registry()
-    record = registry["students"].get(email)
-    if not record:
-        return 404, {"error": "Subscription not found."}
-    if not verify_password(str(body.get("password", "")), record.get("password_salt", ""), record.get("password_hash", "")):
-        return 403, {"error": "Incorrect password."}
-    if not record.get("active", True):
-        return 400, {"error": "Subscription is inactive. Re-subscribe first."}
-    sent, err = _send_subscription_confirmation(record, event="resent")
-    return 200, {
-        "ok": True,
-        "confirmation_email_sent": sent,
-        "confirmation_email_error": err,
-    }
-
-
 def _dispatch(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     action = str(body.get("action", "")).strip().lower()
-    if action == "upsert":
-        return 200, _handle_upsert(body)
-    if action == "get":
-        return 200, _handle_get(body)
-    if action == "unsubscribe":
-        return 200, _handle_unsubscribe(body)
+    if action == "request_subscribe":
+        return 200, _handle_request_subscribe(body)
+    if action == "request_unsubscribe":
+        return 200, _handle_request_unsubscribe(body)
     if action == "admin_list":
         return 200, _handle_admin_list(body)
-    if action == "resend_confirmation":
-        return _handle_resend_confirmation(body)
     return 400, {"error": "unknown action"}
 
+
+# ─────── Landing pages ───────────────────────────────────────
+
+def _subscribe_success_page(subscription: dict[str, Any]) -> str:
+    """Confirmation success page after subscribing."""
+    package_text = ", ".join(
+        package_labels().get(pid, pid) for pid in subscription.get("package_ids", [])
+    )
+    manage_url = _build_manage_url(subscription["email"])
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Subscribed — AU student digest</title>
+</head>
+<body style="margin:0;padding:24px;background:{_ASH_WHITE};font-family:'IBM Plex Sans',Helvetica,Arial,sans-serif;color:{_CHARCOAL}">
+  <div style="max-width:480px;margin:60px auto;text-align:center">
+    <div style="width:64px;height:64px;border-radius:50%;background:{_PINE};margin:0 auto 24px;display:flex;align-items:center;justify-content:center">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+    </div>
+    <h1 style="font-family:'DM Serif Display',Georgia,serif;font-size:28px;margin:0 0 12px">You're subscribed!</h1>
+    <p style="font-size:15px;color:{_WARM_GREY};line-height:1.6;margin:0 0 24px">
+      Your first digest arrives next Monday at 07:00 UTC.
+    </p>
+    <div style="padding:16px;background:white;border-radius:8px;border:1px solid #E5E3DE;margin-bottom:24px;text-align:left">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:{_WARM_GREY};margin-bottom:8px">YOUR PACKAGES</div>
+      <div style="font-size:14px;color:{_CHARCOAL}">{html.escape(package_text)}</div>
+    </div>
+    <a href="{html.escape(manage_url)}" style="font-size:14px;color:{_PINE};text-decoration:none">Change settings &rarr;</a>
+  </div>
+</body>
+</html>"""
+
+
+def _unsubscribe_success_page() -> str:
+    """Confirmation success page after unsubscribing."""
+    manage_url = PUBLIC_STUDENT_MANAGE_URL
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Unsubscribed — AU student digest</title>
+</head>
+<body style="margin:0;padding:24px;background:{_ASH_WHITE};font-family:'IBM Plex Sans',Helvetica,Arial,sans-serif;color:{_CHARCOAL}">
+  <div style="max-width:480px;margin:60px auto;text-align:center">
+    <div style="width:64px;height:64px;border-radius:50%;background:{_ALERT_RED};margin:0 auto 24px;display:flex;align-items:center;justify-content:center">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </div>
+    <h1 style="font-family:'DM Serif Display',Georgia,serif;font-size:28px;margin:0 0 12px">You've been unsubscribed</h1>
+    <p style="font-size:15px;color:{_WARM_GREY};line-height:1.6;margin:0 0 24px">
+      You won't receive any more weekly digests.
+    </p>
+    <a href="{html.escape(manage_url)}" style="font-size:14px;color:{_PINE};text-decoration:none">Resubscribe &rarr;</a>
+  </div>
+</body>
+</html>"""
+
+
+def _token_error_page(message: str) -> str:
+    """Error page for expired or invalid tokens."""
+    manage_url = PUBLIC_STUDENT_MANAGE_URL
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Link expired — AU student digest</title>
+</head>
+<body style="margin:0;padding:24px;background:{_ASH_WHITE};font-family:'IBM Plex Sans',Helvetica,Arial,sans-serif;color:{_CHARCOAL}">
+  <div style="max-width:480px;margin:60px auto;text-align:center">
+    <div style="font-size:48px;margin-bottom:16px">&#x26A0;&#xFE0F;</div>
+    <h1 style="font-family:'DM Serif Display',Georgia,serif;font-size:24px;margin:0 0 12px">Something went wrong</h1>
+    <p style="font-size:15px;color:{_WARM_GREY};line-height:1.6;margin:0 0 24px">
+      {html.escape(message)}<br>
+      Please try again from the settings page.
+    </p>
+    <a href="{html.escape(manage_url)}" style="display:inline-block;background:{_PINE};color:white;font-size:14px;font-weight:600;padding:10px 24px;border-radius:8px;text-decoration:none">Go to settings &rarr;</a>
+  </div>
+</body>
+</html>"""
+
+
+# ─────── Settings page ───────────────────────────────────────
 
 def _manage_page(
     email: str,
@@ -294,7 +480,7 @@ def _manage_page(
     package_ids: list[str] | None = None,
     max_papers_per_week: int = DEFAULT_MAX_PAPERS,
 ) -> str:
-    """Return a simple browser-based student subscription management page."""
+    """Return the passwordless student subscription management page."""
     safe_email = html.escape(email)
     initial_packages = json.dumps(list(package_ids or []))
     initial_max_papers = clamp_max_papers(max_papers_per_week)
@@ -315,110 +501,83 @@ def _manage_page(
     <title>AU student digest</title>
     <style>
       :root {{
-        --bg: #f6f1e8;
-        --panel: #fffdf8;
-        --text: #1f2933;
-        --muted: #5f6c76;
-        --accent: #1d5b57;
-        --accent-light: rgba(29, 91, 87, 0.08);
-        --danger: #8a3b12;
-        --border: #d8d1c6;
+        --pine: {_PINE};
+        --gold: {_GOLD};
+        --ash-white: {_ASH_WHITE};
+        --charcoal: {_CHARCOAL};
+        --warm-grey: {_WARM_GREY};
+        --border: #D8D6D0;
       }}
       * {{ box-sizing: border-box; }}
       body {{
         margin: 0;
         min-height: 100vh;
-        background: linear-gradient(180deg, var(--bg), #efe6d7);
-        color: var(--text);
-        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        background: var(--ash-white);
+        color: var(--charcoal);
+        font-family: "IBM Plex Sans", Helvetica, Arial, sans-serif;
         padding: 24px;
       }}
       main {{
-        width: min(100%, 600px);
+        width: min(100%, 520px);
         margin: 0 auto;
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 18px;
-        padding: 32px;
-        box-shadow: 0 18px 48px rgba(31, 41, 51, 0.08);
+        background: white;
+        border-bottom: 3px solid var(--pine);
+        border-radius: 12px;
+        padding: 36px 32px 32px;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.06);
       }}
       h1 {{
-        margin: 0 0 6px;
-        font-size: clamp(1.6rem, 4vw, 2.2rem);
+        font-family: "DM Serif Display", Georgia, serif;
+        margin: 0 0 4px;
+        font-size: 28px;
+        color: var(--charcoal);
         line-height: 1.1;
       }}
-      h2 {{
-        font-size: 0.85rem;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--muted);
-        margin: 0 0 12px;
-        font-weight: 600;
-      }}
-      p, label, button, input {{
-        font-size: 0.95rem;
-      }}
-      .muted {{
-        color: var(--muted);
+      .subtitle {{
+        color: var(--warm-grey);
+        font-size: 14px;
+        margin: 0 0 28px;
         line-height: 1.5;
-        margin: 0 0 20px;
-        font-size: 0.9rem;
       }}
-      .section {{
-        margin-bottom: 24px;
-      }}
-      .section:last-of-type {{
-        margin-bottom: 0;
+      .section-label {{
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--warm-grey);
+        font-weight: 600;
+        margin: 0 0 12px;
       }}
       .divider {{
         border: none;
         border-top: 1px solid var(--border);
         margin: 24px 0;
       }}
-      .field {{
-        margin-bottom: 12px;
-      }}
       .field label {{
         display: block;
-        font-size: 0.82rem;
-        color: var(--muted);
+        font-size: 13px;
+        color: var(--warm-grey);
         margin-bottom: 4px;
         font-weight: 500;
-      }}
-      input[type="text"], input[type="password"], input[type="number"] {{
-        width: 100%;
-        padding: 10px 12px;
-        border-radius: 8px;
-        border: 1px solid var(--border);
-        background: white;
-        font-size: 0.95rem;
-      }}
-      input:focus {{
-        outline: 2px solid var(--accent);
-        outline-offset: -1px;
-        border-color: var(--accent);
       }}
       .email-row {{
         display: flex;
         align-items: center;
-        background: white;
+        background: #F8F7F4;
         border: 1px solid var(--border);
         border-radius: 8px;
         overflow: hidden;
       }}
       .email-row:focus-within {{
-        outline: 2px solid var(--accent);
-        outline-offset: -1px;
-        border-color: var(--accent);
+        border-color: var(--pine);
+        box-shadow: 0 0 0 2px rgba(47,79,62,0.12);
       }}
       .email-affix {{
         padding: 10px 0 10px 12px;
-        font-size: 0.9rem;
-        color: var(--muted);
+        font-size: 14px;
+        color: var(--warm-grey);
         font-family: "IBM Plex Mono", monospace;
         white-space: nowrap;
         user-select: none;
-        line-height: 1;
       }}
       .email-affix:last-child {{
         padding: 10px 12px 10px 0;
@@ -430,165 +589,189 @@ def _manage_page(
         padding: 10px 2px;
         text-align: center;
         font-family: "IBM Plex Mono", monospace;
-        font-size: 0.9rem;
+        font-size: 14px;
         outline: none;
         background: transparent;
       }}
       .packages {{
-        display: grid;
-        gap: 8px;
-        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 20px;
       }}
       .package {{
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 10px;
         padding: 10px 12px;
         border: 1px solid var(--border);
-        border-radius: 10px;
+        border-radius: 8px;
         background: white;
         cursor: pointer;
-        transition: border-color 0.15s;
+        transition: border-color 0.15s, background 0.15s;
+        font-size: 14px;
       }}
       .package:has(input:checked) {{
-        border-color: var(--accent);
-        background: var(--accent-light);
+        border-color: var(--pine);
+        background: rgba(47,79,62,0.04);
       }}
       .package input[type="checkbox"] {{
-        accent-color: var(--accent);
+        accent-color: var(--pine);
+        width: 16px;
+        height: 16px;
       }}
-      button {{
+      .stepper {{
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 4px;
+      }}
+      .stepper button {{
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        border: 1px solid var(--border);
+        background: white;
+        font-size: 18px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--charcoal);
+      }}
+      .stepper button:hover {{
+        border-color: var(--pine);
+        color: var(--pine);
+      }}
+      .stepper-value {{
+        font-family: "DM Serif Display", Georgia, serif;
+        font-size: 24px;
+        min-width: 32px;
+        text-align: center;
+      }}
+      .stepper-label {{
+        font-size: 13px;
+        color: var(--warm-grey);
+        margin-left: 4px;
+      }}
+      button.primary {{
         border: 0;
-        border-radius: 10px;
-        padding: 11px 20px;
-        background: var(--accent);
+        border-radius: 8px;
+        padding: 14px 20px;
+        background: var(--pine);
         color: white;
         cursor: pointer;
         font-weight: 600;
-        font-size: 0.95rem;
-        transition: opacity 0.15s;
+        font-size: 15px;
         width: 100%;
+        transition: opacity 0.15s;
       }}
-      button:hover {{
+      button.primary:hover {{
         opacity: 0.9;
       }}
-      button.secondary {{
-        background: white;
-        color: var(--accent);
-        border: 1px solid var(--accent);
+      .confirm-note {{
+        font-size: 13px;
+        color: var(--warm-grey);
+        text-align: center;
+        margin-top: 12px;
+        line-height: 1.4;
       }}
-      .btn-row {{
-        display: flex;
-        gap: 10px;
+      .unsub-section {{
+        text-align: center;
+        margin-top: 20px;
       }}
-      .btn-row button {{
-        flex: 1;
-      }}
-      .text-link {{
+      .unsub-link {{
         background: none;
         border: 0;
         padding: 0;
-        color: var(--muted);
-        font-size: 0.82rem;
+        color: var(--warm-grey);
+        font-size: 13px;
         cursor: pointer;
         text-decoration: underline;
         text-underline-offset: 2px;
-        width: auto;
-        font-weight: 400;
       }}
-      .text-link:hover {{
-        color: var(--text);
+      .unsub-link:hover {{
+        color: {_ALERT_RED};
       }}
-      .footer-links {{
-        display: flex;
-        gap: 16px;
-        justify-content: center;
-        margin-top: 20px;
+      .unsub-hint {{
+        font-size: 12px;
+        color: var(--warm-grey);
+        margin-top: 4px;
+        opacity: 0.7;
       }}
       .status {{
         margin-top: 16px;
         padding: 12px 14px;
-        border-radius: 10px;
-        background: var(--accent-light);
-        color: var(--accent);
-        min-height: 44px;
-        font-size: 0.9rem;
+        border-radius: 8px;
+        background: rgba(47,79,62,0.06);
+        color: var(--pine);
+        font-size: 14px;
         line-height: 1.4;
+        text-align: center;
       }}
       .status:empty {{
         display: none;
       }}
-      .settings-section {{
-        display: none;
-      }}
-      .settings-section.visible {{
-        display: block;
+      .status.error {{
+        background: rgba(192,57,43,0.06);
+        color: {_ALERT_RED};
       }}
     </style>
   </head>
   <body>
     <main>
       <h1>AU student digest</h1>
-      <p class="muted">Weekly arXiv picks, scored for your interests.</p>
+      <p class="subtitle">Weekly arXiv picks, scored for your interests.</p>
 
-      <!-- ── Section 1: Identity + Load ── -->
-      <div class="section">
-        <h2>Sign in</h2>
-        <div class="field">
-          <label for="email-digits">AU student ID</label>
-          <div class="email-row">
-            <span class="email-affix">au</span>
-            <input id="email-digits" type="text" inputmode="numeric" pattern="\\d{{6}}" maxlength="6" value="{safe_email.replace('au','').replace('@uni.au.dk','')}" placeholder="612345">
-            <span class="email-affix">@uni.au.dk</span>
-          </div>
-        </div>
-        <div class="field">
-          <label for="password">Password</label>
-          <input id="password" type="password" placeholder="Choose a password (new) or enter yours (returning)">
-        </div>
-        <button class="secondary" type="button" onclick="loadCurrent()">Load my settings</button>
-      </div>
-
-      <hr class="divider">
-
-      <!-- ── Section 2: Settings (always visible, populated on load) ── -->
-      <div class="section" id="settings-section">
-        <h2>Your packages</h2>
-        <div class="packages" style="margin-bottom: 14px;">
-          {packages_markup}
-        </div>
-        <div class="field">
-          <label for="max_papers">Max papers per week</label>
-          <input id="max_papers" type="number" min="1" max="20" value="{DEFAULT_MAX_PAPERS}">
-        </div>
-        <div class="field">
-          <label for="new_password">New password (optional)</label>
-          <input id="new_password" type="password" placeholder="Leave blank to keep current">
+      <!-- AU student ID -->
+      <div class="field" style="margin-bottom:24px">
+        <label for="email-digits">AU student ID</label>
+        <div class="email-row">
+          <span class="email-affix">au</span>
+          <input id="email-digits" type="text" inputmode="numeric" pattern="\\d{{6}}" maxlength="6" value="{safe_email.replace('au','').replace('@uni.au.dk','')}" placeholder="612345">
+          <span class="email-affix">@uni.au.dk</span>
         </div>
       </div>
 
       <hr class="divider">
 
-      <!-- ── Section 3: Actions ── -->
-      <div class="section">
-        <div class="btn-row">
-          <button id="save-btn" type="button" onclick="saveSubscription()">Subscribe</button>
-        </div>
+      <!-- Packages -->
+      <div class="section-label">PICK YOUR PACKAGES</div>
+      <div class="packages">
+        {packages_markup}
       </div>
+
+      <!-- Max papers stepper -->
+      <div class="field">
+        <label>Max papers per week</label>
+        <div class="stepper">
+          <button type="button" onclick="adjustMax(-1)">&minus;</button>
+          <span id="max-display" class="stepper-value">{initial_max_papers}</span>
+          <button type="button" onclick="adjustMax(1)">+</button>
+          <span class="stepper-label">papers</span>
+        </div>
+        <input id="max_papers" type="hidden" value="{initial_max_papers}">
+      </div>
+
+      <hr class="divider">
+
+      <!-- Subscribe button -->
+      <button class="primary" type="button" onclick="saveSubscription()">Subscribe</button>
+      <div class="confirm-note">We'll send a confirmation link to your AU email.</div>
 
       <div id="status" class="status"></div>
 
-      <!-- ── Footer: rare actions as text links ── -->
-      <div class="footer-links">
-        <button class="text-link" type="button" onclick="resendConfirmation()">Resend confirmation email</button>
-        <button class="text-link" type="button" onclick="handleUnsubscribe()" style="color: var(--danger);">Unsubscribe</button>
+      <!-- Unsubscribe -->
+      <div class="unsub-section">
+        <button class="unsub-link" type="button" onclick="handleUnsubscribe()">Unsubscribe</button>
+        <div class="unsub-hint">Fill in your AU ID above first.</div>
       </div>
     </main>
     <script>
-      const mode = new URLSearchParams(window.location.search).get("mode") || "";
       const initialPackages = {initial_packages};
       const initialMaxPapers = {initial_max_papers};
       const statusEl = document.getElementById("status");
+      let maxPapers = initialMaxPapers;
 
       function selectedPackages() {{
         return Array.from(document.querySelectorAll('input[name="package_ids"]:checked'))
@@ -602,84 +785,55 @@ def _manage_page(
         }});
       }}
 
-      function setStatus(message, isError = false) {{
+      function adjustMax(delta) {{
+        maxPapers = Math.min(20, Math.max(1, maxPapers + delta));
+        document.getElementById("max-display").textContent = maxPapers;
+        document.getElementById("max_papers").value = maxPapers;
+      }}
+
+      function setStatus(message, isError) {{
         statusEl.textContent = message;
-        statusEl.style.background = isError ? "rgba(138, 59, 18, 0.08)" : "rgba(29, 91, 87, 0.08)";
-        statusEl.style.color = isError ? "var(--danger)" : "var(--accent)";
+        statusEl.className = "status" + (isError ? " error" : "");
         statusEl.style.display = message ? "block" : "none";
       }}
 
       function getEmail() {{
         const digits = document.getElementById("email-digits").value.trim();
-        if (!/^\d{{6}}$/.test(digits)) {{
+        if (!/^\\d{{6}}$/.test(digits)) {{
           throw new Error("Enter your 6-digit AU student ID.");
         }}
         return "au" + digits + "@uni.au.dk";
       }}
 
-      async function callApi(action) {{
-        const payload = {{
-          action,
-          email: getEmail(),
-          password: document.getElementById("password").value,
-          new_password: document.getElementById("new_password").value,
-          max_papers_per_week: Number(document.getElementById("max_papers").value || "{DEFAULT_MAX_PAPERS}"),
-          package_ids: selectedPackages(),
-        }};
-        const response = await fetch(window.location.pathname, {{
-          method: "POST",
-          headers: {{ "Content-Type": "application/json" }},
-          body: JSON.stringify(payload),
-        }});
-        const data = await response.json();
-        if (!response.ok || !data.ok) {{
-          throw new Error(data.error || "Request failed");
-        }}
-        return data;
-      }}
-
-      async function loadCurrent() {{
-        setStatus("Loading...");
-        try {{
-          const data = await callApi("get");
-          document.getElementById("max_papers").value = data.subscription.max_papers_per_week;
-          setPackages(data.subscription.package_ids);
-          document.getElementById("save-btn").textContent = "Save changes";
-          setStatus("Settings loaded. Edit below and save.");
-        }} catch (error) {{
-          setStatus(error.message, true);
-        }}
-      }}
-
       async function saveSubscription() {{
-        setStatus("Saving...");
+        setStatus("", false);
         try {{
-          const data = await callApi("upsert");
-          setPackages(data.subscription.package_ids);
-          document.getElementById("max_papers").value = data.subscription.max_papers_per_week;
-          document.getElementById("new_password").value = "";
-          document.getElementById("save-btn").textContent = "Save changes";
-          const msg = "Saved. First digest arrives next Monday at 07:00 UTC.";
-          if (data.confirmation_email_sent) {{
-            setStatus(msg + " Confirmation email sent.");
-          }} else if (data.confirmation_email_error) {{
-            setStatus(msg + " Confirmation email failed: " + data.confirmation_email_error, true);
-          }} else {{
-            setStatus(msg);
+          const email = getEmail();
+          const packages = selectedPackages();
+          if (packages.length === 0) {{
+            setStatus("Pick at least one package.", true);
+            return;
           }}
-        }} catch (error) {{
-          setStatus(error.message, true);
-        }}
-      }}
-
-      async function resendConfirmation() {{
-        setStatus("Sending confirmation email...");
-        try {{
-          const data = await callApi("resend_confirmation");
-          if (data.confirmation_email_sent) {{
-            setStatus("Confirmation email sent. Check your inbox and spam folder.");
+          setStatus("Sending confirmation...", false);
+          const response = await fetch(window.location.pathname, {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{
+              action: "request_subscribe",
+              email: email,
+              package_ids: packages,
+              max_papers_per_week: maxPapers,
+            }}),
+          }});
+          const data = await response.json();
+          if (!response.ok || !data.ok) {{
+            setStatus(data.error || "Request failed", true);
+            return;
+          }}
+          if (data.confirmation_sent) {{
+            setStatus("Check your AU email for a confirmation link.");
           }} else {{
-            setStatus("Could not send: " + (data.confirmation_email_error || "unknown error"), true);
+            setStatus("Could not send confirmation: " + (data.confirmation_error || "unknown error"), true);
           }}
         }} catch (error) {{
           setStatus(error.message, true);
@@ -687,24 +841,35 @@ def _manage_page(
       }}
 
       async function handleUnsubscribe() {{
-        if (!confirm("Stop receiving the AU student digest at this email?")) {{
-          return;
-        }}
-        setStatus("Unsubscribing...");
+        setStatus("", false);
         try {{
-          await callApi("unsubscribe");
-          setStatus("Unsubscribed. You can re-subscribe any time.");
+          const email = getEmail();
+          setStatus("Sending confirmation...", false);
+          const response = await fetch(window.location.pathname, {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{
+              action: "request_unsubscribe",
+              email: email,
+            }}),
+          }});
+          const data = await response.json();
+          if (!response.ok || !data.ok) {{
+            setStatus(data.error || "Request failed", true);
+            return;
+          }}
+          if (data.confirmation_sent) {{
+            setStatus("Check your AU email to confirm unsubscribe.");
+          }} else {{
+            setStatus("Could not send confirmation: " + (data.confirmation_error || "unknown error"), true);
+          }}
         }} catch (error) {{
           setStatus(error.message, true);
         }}
       }}
 
       // Initialise
-      document.getElementById("max_papers").value = initialMaxPapers;
       setPackages(initialPackages);
-      if (mode === "unsubscribe") {{
-        setStatus("Enter your password, then click Unsubscribe below.");
-      }}
     </script>
   </body>
 </html>"""
@@ -715,6 +880,21 @@ class handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+
+        # Token confirmation flow
+        action = query.get("action", [""])[0]
+        token = query.get("token", [""])[0]
+        if action == "confirm" and token:
+            page, content_type = _handle_confirm(token)
+            payload = page.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", f"{content_type}; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+
+        # Settings page
         email = query.get("email", [""])[0]
         mode = query.get("mode", [""])[0]
         raw_packages = query.get("packages", [""])[0]

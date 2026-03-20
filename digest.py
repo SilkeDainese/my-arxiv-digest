@@ -676,12 +676,18 @@ def fetch_arxiv_papers(config: dict[str, Any]) -> list[dict[str, Any]]:
 
             # Check colleagues — institutional matches (arXiv affiliation XML + abstract fallback)
             affiliations = []
+            author_affiliations: dict[str, list[str]] = {}
             ns_arxiv = {"arxiv": "http://arxiv.org/schemas/atom"}
             for author_el in entry.findall("atom:author", ns):
-                for aff_el in author_el.findall("arxiv:affiliation", ns_arxiv):
-                    aff_text = aff_el.text
-                    if aff_text:
-                        affiliations.append(aff_text)
+                author_name = author_el.findtext("atom:name", "", ns)
+                affs = [
+                    aff_el.text
+                    for aff_el in author_el.findall("arxiv:affiliation", ns_arxiv)
+                    if aff_el.text
+                ]
+                if affs and author_name:
+                    author_affiliations[author_name] = affs
+                affiliations.extend(affs)
             affiliation_text = " ".join(affiliations).lower()
             text_lower = (title + " " + abstract).lower()
             for inst in config["colleagues"].get("institutions", []):
@@ -713,6 +719,7 @@ def fetch_arxiv_papers(config: dict[str, Any]) -> list[dict[str, Any]]:
                 "title": title,
                 "abstract": abstract,
                 "authors": authors,
+                "author_affiliations": author_affiliations,
                 "published": published.strftime("%Y-%m-%d"),
                 "category": category,
                 "url": f"https://arxiv.org/abs/{arxiv_id}",
@@ -1273,6 +1280,138 @@ def _render_colleague_section(colleague_papers: list[dict[str, Any]]) -> str:
   </td></tr>"""
 
 
+_AU_AFFILIATION_PATTERNS = [
+    "aarhus university",
+    "aarhus uni",
+    "au, denmark",
+]
+
+
+def detect_au_researchers(papers: list[dict[str, Any]]) -> None:
+    """Flag papers with Aarhus University affiliated authors."""
+    for paper in papers:
+        author_affs = paper.get("author_affiliations", {})
+        au_authors: list[str] = []
+        for author_name, affs in author_affs.items():
+            for aff in affs:
+                aff_lower = aff.lower()
+                if any(pat in aff_lower for pat in _AU_AFFILIATION_PATTERNS):
+                    au_authors.append(author_name)
+                    break
+        paper["is_au_researcher"] = bool(au_authors)
+        paper["au_researcher_authors"] = au_authors
+
+
+def _render_student_paper_card(p: dict[str, Any]) -> str:
+    """Return a student-mode paper card: score badge, AU badge, compact metadata, abstract toggle."""
+    score = p.get("relevance_score", 5)
+    ac = _accent_color(score)
+    authors_display = ", ".join(p.get("authors", [])[:4])
+    if len(p.get("authors", [])) > 4:
+        authors_display += f" +{len(p['authors']) - 4}"
+
+    # Score badge
+    score_badge = (
+        f'<span style="display:inline-block;background:{ac};color:white;font-family:\'DM Serif Display\',Georgia,serif;'
+        f'font-size:14px;padding:2px 8px;border-radius:4px;margin-right:6px">{score}</span>'
+    )
+
+    # AU RESEARCHER badge (conditional)
+    au_badge = ""
+    au_bio = ""
+    if p.get("is_au_researcher"):
+        au_badge = (
+            f'<span style="display:inline-block;background:{GOLD};color:{ASH_BLACK};font-family:\'DM Mono\',monospace;'
+            f'font-size:9px;letter-spacing:0.15em;text-transform:uppercase;padding:3px 8px;border-radius:4px;'
+            f'margin-left:4px">AU RESEARCHER</span>'
+        )
+        au_authors = p.get("au_researcher_authors", [])
+        au_affs = p.get("author_affiliations", {})
+        au_lines = []
+        for name in au_authors:
+            affs = au_affs.get(name, [])
+            aff_text = ", ".join(affs[:2]) if affs else "Aarhus University"
+            au_lines.append(f"{_esc(name)} — {_esc(aff_text)}")
+        if au_lines:
+            au_bio = (
+                f'<div style="background:{GOLD_WASH};border:1px solid {GOLD_LIGHT};border-radius:5px;'
+                f'padding:8px 12px;margin:8px 0;font-family:\'IBM Plex Sans\',sans-serif;font-size:12px;'
+                f'color:{UMBER};line-height:1.5">'
+                + "<br>".join(au_lines)
+                + "</div>"
+            )
+
+    # Compact metadata line
+    category = p.get("category", "")
+    arxiv_id = p.get("id", "")
+    pub_date = p.get("published", "")
+    meta_parts = [_esc(authors_display)]
+    if arxiv_id:
+        meta_parts.append(f"arXiv:{_esc(arxiv_id)}")
+    if category:
+        meta_parts.append(_esc(category))
+    if pub_date:
+        meta_parts.append(_esc(pub_date))
+    meta_line = " &middot; ".join(meta_parts)
+
+    # Summary (plain text finding)
+    summary = _esc(_one_sentence(p.get("plain_summary", "")))
+
+    # Abstract toggle + keyword tags
+    abstract = _esc(p.get("abstract", ""))
+    matched_kw = p.get("matched_keywords", [])
+    tags_html = " ".join(
+        f'<span style="display:inline-block;font-family:\'DM Mono\',monospace;font-size:9px;'
+        f'background:{PINE_WASH};color:{PINE};padding:2px 6px;border-radius:3px;margin:2px 2px 0 0">'
+        f'{_esc(kw)}</span>'
+        for kw in matched_kw[:6]
+    )
+
+    # Pre-build summary HTML to avoid backslash-in-fstring issue (Python 3.9)
+    summary_html = ""
+    if summary:
+        body_font = "'IBM Plex Sans',sans-serif"
+        summary_html = (
+            f'<div style="font-family:{body_font};font-size:12px;color:{ASH_BLACK};'
+            f'line-height:1.5;margin-bottom:8px">{summary}</div>'
+        )
+
+    return f"""
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:10px">
+        <tr><td style="background:white;border:1px solid {CARD_BORDER};border-left:4px solid {ac};border-radius:8px;padding:14px 16px 12px">
+            <div style="margin-bottom:6px">{score_badge}{au_badge}</div>
+            <div style="font-family:'IBM Plex Sans',sans-serif;font-size:15px;font-weight:600;color:{ASH_BLACK};line-height:1.35;margin-bottom:4px">
+                <a href="{p.get('url', '')}" style="color:{ASH_BLACK};text-decoration:none">{_esc(_short_title(p.get('title', '')))}</a>
+            </div>
+            <div style="font-family:'DM Mono',monospace;font-size:10px;color:{WARM_GREY};margin-bottom:8px">{meta_line}</div>
+            {au_bio}
+            {summary_html}
+            <details style="font-family:'IBM Plex Sans',sans-serif;font-size:12px;color:{WARM_GREY};margin-bottom:6px">
+                <summary style="cursor:pointer;color:{PINE};font-size:11px;margin-bottom:4px">Show abstract</summary>
+                <div style="line-height:1.5;margin-top:4px">{abstract}</div>
+            </details>
+            <div>{tags_html}</div>
+        </td></tr>
+    </table>"""
+
+
+def _render_student_header(papers: list[dict[str, Any]], date_str: str) -> str:
+    """Return the student digest email header with pine bar."""
+    return f"""
+  <tr><td style="background:{PINE};padding:20px 28px">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0">
+      <tr>
+        <td style="font-family:'DM Serif Display',Georgia,serif;font-size:20px;color:white">AU student digest</td>
+        <td style="text-align:right;font-family:'DM Mono',monospace;font-size:11px;color:rgba(255,255,255,0.7)">{date_str}</td>
+      </tr>
+    </table>
+  </td></tr>
+  <tr><td style="padding:24px 28px 16px">
+    <div style="font-family:'DM Serif Display',Georgia,serif;font-size:24px;color:{ASH_BLACK};margin-bottom:4px">Your papers this week</div>
+    <div style="font-family:'DM Mono',monospace;font-size:12px;color:{WARM_GREY}">{len(papers)} paper{"s" if len(papers) != 1 else ""} selected for you</div>
+  </td></tr>"""
+
+
 def _render_paper_card(p: dict[str, Any], is_top_pick: bool, total_papers: int, github_repo: str) -> str:
         """Return a compact deep-read HTML card for a single paper."""
         score = p.get("relevance_score", 5)
@@ -1492,8 +1631,9 @@ def _render_footer(config: dict[str, Any], scoring_method: str) -> str:
         service_links.append(f'<a href="{pause_url}" style="{link_style}">&#x23F8;&#xFE0F; Pause digest</a>')
         service_links.append(f'<a href="{delete_url}" style="{link_style}">&#x1F5D1;&#xFE0F; Unsubscribe &amp; delete</a>')
     elif subscription_manage_url:
-        service_links.append(f'<a href="{subscription_manage_url}" style="{link_style}">&#x2699;&#xFE0F; Change packages</a>')
-        service_links.append(f'<a href="{subscription_manage_url}" style="{link_style}">&#x1F4DD; Manage subscription</a>')
+        service_links.append(f'<a href="{subscription_manage_url}" style="{link_style}">&#x2699;&#xFE0F; Change settings</a>')
+        service_links.append(f'<a href="{subscription_manage_url}" style="{link_style}">&#x1F4DD; Change packages</a>')
+        service_links.append(f'<a href="{subscription_manage_url}" style="{link_style}">&#x1F4CB; Manage subscription</a>')
         if subscription_unsubscribe_url:
             service_links.append(f'<a href="{subscription_unsubscribe_url}" style="{link_style}">&#x1F5D1;&#xFE0F; Unsubscribe</a>')
     else:
@@ -1559,6 +1699,7 @@ def render_html(papers: list[dict[str, Any]], colleague_papers: list[dict[str, A
     digest_name = config.get("digest_name", "arXiv Digest")
     recipient_view_mode = config.get("recipient_view_mode", "deep_read")
     github_repo = config.get("github_repo", "")
+    student_mode = bool(config.get("subscription_manage_url"))
 
     if own_papers is None:
         own_papers = []
@@ -1566,7 +1707,10 @@ def render_html(papers: list[dict[str, Any]], colleague_papers: list[dict[str, A
     # ── Build paper cards ──
     cards_html = ""
     displayed_papers = papers
-    if recipient_view_mode == "5_min_skim":
+    if student_mode:
+        for p in displayed_papers:
+            cards_html += _render_student_paper_card(p)
+    elif recipient_view_mode == "5_min_skim":
         displayed_papers = papers[:3]
         for p in displayed_papers:
             cards_html += _render_skim_card(p, github_repo)
@@ -1582,7 +1726,30 @@ def render_html(papers: list[dict[str, Any]], colleague_papers: list[dict[str, A
     if not papers and not colleague_papers:
         cards_html = f'<div style="text-align:center;padding:60px 24px;color:{WARM_GREY};font-family:\'DM Serif Display\',Georgia,serif;font-style:italic;font-size:18px">No highly relevant papers this period. All quiet on the arXiv front. &#x2615;</div>'
 
-    # ── Assemble full document ──
+    # ── Student mode uses simpler layout ──
+    if student_mode:
+        return (
+            _render_css(digest_name, researcher_name, date_str)
+            + "\n"
+            + _render_student_header(papers, date_str)
+            + "\n"
+            + f"""
+  <!-- PAPER CARDS -->
+  <tr><td style="padding:0 24px 24px">
+    {cards_html}
+  </td></tr>
+"""
+            + _render_footer(config, scoring_method)
+            + """
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>"""
+        )
+
+    # ── Assemble full document (researcher mode) ──
     return (
         _render_css(digest_name, researcher_name, date_str)
         + "\n"
