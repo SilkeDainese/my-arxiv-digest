@@ -420,8 +420,12 @@ def _manage_page(
       <h1>Manage your AU student digest</h1>
       <p class="muted">{html.escape(status_text)}</p>
       <div class="stack">
-        <label>Email
-          <input id="email" type="email" value="{safe_email}" placeholder="student@post.au.dk">
+        <label>AU student ID
+          <div style="display:flex;align-items:center;gap:0;">
+            <span style="padding:8px 0 8px 12px;background:var(--bg-input,#f5f5f5);border:1px solid var(--border,#ccc);border-right:none;border-radius:6px 0 0 6px;font-size:14px;color:#666;">au</span>
+            <input id="email-digits" type="text" inputmode="numeric" pattern="\\d{{6}}" maxlength="6" value="{safe_email.replace('au','').replace('@uni.au.dk','')}" placeholder="612345" style="border-radius:0;border-left:none;border-right:none;width:80px;text-align:center;font-family:monospace;">
+            <span style="padding:8px 12px 8px 0;background:var(--bg-input,#f5f5f5);border:1px solid var(--border,#ccc);border-left:none;border-radius:0 6px 6px 0;font-size:14px;color:#666;">@uni.au.dk</span>
+          </div>
         </label>
         <label>Password
           <input id="password" type="password" placeholder="Your student digest password">
@@ -471,10 +475,18 @@ def _manage_page(
         statusEl.style.color = isError ? "var(--danger)" : "var(--accent)";
       }}
 
+      function getEmail() {{
+        const digits = document.getElementById("email-digits").value.trim();
+        if (!/^\d{{6}}$/.test(digits)) {{
+          throw new Error("Enter your 6-digit AU student ID.");
+        }}
+        return "au" + digits + "@uni.au.dk";
+      }}
+
       async function callApi(action) {{
         const payload = {{
           action,
-          email: document.getElementById("email").value,
+          email: getEmail(),
           password: document.getElementById("password").value,
           new_password: document.getElementById("new_password").value,
           max_papers_per_week: Number(document.getElementById("max_papers").value || "{DEFAULT_MAX_PAPERS}"),

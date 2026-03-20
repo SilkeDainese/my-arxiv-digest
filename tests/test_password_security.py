@@ -163,3 +163,73 @@ class TestRelayCopyInSync:
         """A hash from the relay module must verify correctly in the root module."""
         salt, hash_str = relay_reg.hash_password("cross-check")
         assert sr.verify_password("cross-check", salt, hash_str)
+
+
+# ─────────────────────────────────────────────────────────────
+#  Scrypt OpenSSL 3.x fallback
+# ─────────────────────────────────────────────────────────────
+
+
+class TestScryptFallback:
+    """When scrypt raises ValueError/OSError (OpenSSL 3.x memory limits),
+    hash_password must fall back to pbkdf2 instead of crashing."""
+
+    @pytest.mark.skipif(not SCRYPT_AVAILABLE, reason="scrypt not available")
+    def test_relay_hash_falls_back_to_pbkdf2_on_scrypt_error(self):
+        from unittest.mock import patch
+        with patch.object(hashlib, "scrypt", side_effect=ValueError("digital envelope routines")):
+            salt, hash_str = relay_reg.hash_password("test123")
+        assert hash_str.startswith("pbkdf2_sha256$")
+        assert relay_reg.verify_password("test123", salt, hash_str)
+
+    @pytest.mark.skipif(not SCRYPT_AVAILABLE, reason="scrypt not available")
+    def test_root_hash_falls_back_to_pbkdf2_on_scrypt_error(self):
+        from unittest.mock import patch
+        with patch.object(hashlib, "scrypt", side_effect=ValueError("digital envelope routines")):
+            salt, hash_str = sr.hash_password("test123")
+        assert hash_str.startswith("pbkdf2_sha256$")
+        assert sr.verify_password("test123", salt, hash_str)
+
+    @pytest.mark.skipif(not SCRYPT_AVAILABLE, reason="scrypt not available")
+    def test_relay_verify_returns_false_on_scrypt_error(self):
+        """If verify cannot run scrypt, return False instead of crashing."""
+        from unittest.mock import patch
+        salt, hash_str = relay_reg.hash_password("test123")
+        if hash_str.startswith("scrypt$"):
+            with patch.object(hashlib, "scrypt", side_effect=OSError("memory limit")):
+                assert relay_reg.verify_password("test123", salt, hash_str) is False
+
+    @pytest.mark.skipif(not SCRYPT_AVAILABLE, reason="scrypt not available")
+    def test_root_verify_returns_false_on_scrypt_error(self):
+        from unittest.mock import patch
+        salt, hash_str = sr.hash_password("test123")
+        if hash_str.startswith("scrypt$"):
+            with patch.object(hashlib, "scrypt", side_effect=OSError("memory limit")):
+                assert sr.verify_password("test123", salt, hash_str) is False
+
+
+# ─────────────────────────────────────────────────────────────
+#  AU email validation (relay only)
+# ─────────────────────────────────────────────────────────────
+
+
+class TestAUEmailValidation:
+    """The relay normalise_email must reject non-AU emails."""
+
+    def test_valid_au_email_accepted(self):
+        assert relay_reg.normalise_email("au617716@uni.au.dk") == "au617716@uni.au.dk"
+
+    def test_uppercase_au_email_normalised(self):
+        assert relay_reg.normalise_email("AU617716@UNI.AU.DK") == "au617716@uni.au.dk"
+
+    def test_non_au_email_rejected(self):
+        with pytest.raises(ValueError, match="Only AU student emails"):
+            relay_reg.normalise_email("random@gmail.com")
+
+    def test_au_staff_email_rejected(self):
+        with pytest.raises(ValueError, match="Only AU student emails"):
+            relay_reg.normalise_email("silke@phys.au.dk")
+
+    def test_wrong_format_au_rejected(self):
+        with pytest.raises(ValueError, match="Only AU student emails"):
+            relay_reg.normalise_email("student@uni.au.dk")

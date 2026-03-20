@@ -37,7 +37,7 @@ def test_registry_dispatch_lifecycle(monkeypatch):
     status, payload = students_api._dispatch(
         {
             "action": "upsert",
-            "email": "Student@Example.com",
+            "email": "AU612345@UNI.AU.DK",
             "password": "old-password",
             "package_ids": ["exoplanets"],
             "max_papers_per_week": 4,
@@ -45,21 +45,21 @@ def test_registry_dispatch_lifecycle(monkeypatch):
     )
 
     assert status == 200
-    assert payload["subscription"]["email"] == "student@example.com"
-    assert saved["message"] == "Update student subscription for student@example.com"
+    assert payload["subscription"]["email"] == "au612345@uni.au.dk"
+    assert saved["message"] == "Update student subscription for au612345@uni.au.dk"
     assert payload["subscription_event"] == "created"
     assert payload["confirmation_email_sent"] is True
-    assert confirmation_calls == [("student@example.com", "created")]
+    assert confirmation_calls == [("au612345@uni.au.dk", "created")]
 
     with pytest.raises(PermissionError):
         students_api._handle_get(
-            {"email": "student@example.com", "password": "wrong-password"}
+            {"email": "au612345@uni.au.dk", "password": "wrong-password"}
         )
 
     status, payload = students_api._dispatch(
         {
             "action": "upsert",
-            "email": "student@example.com",
+            "email": "au612345@uni.au.dk",
             "password": "old-password",
             "new_password": "new-password",
             "package_ids": ["stars", "galaxies"],
@@ -75,13 +75,13 @@ def test_registry_dispatch_lifecycle(monkeypatch):
 
     with pytest.raises(PermissionError):
         students_api._handle_get(
-            {"email": "student@example.com", "password": "old-password"}
+            {"email": "au612345@uni.au.dk", "password": "old-password"}
         )
 
     status, payload = students_api._dispatch(
         {
             "action": "get",
-            "email": "student@example.com",
+            "email": "au612345@uni.au.dk",
             "password": "new-password",
         }
     )
@@ -91,7 +91,7 @@ def test_registry_dispatch_lifecycle(monkeypatch):
     status, payload = students_api._dispatch(
         {
             "action": "unsubscribe",
-            "email": "student@example.com",
+            "email": "au612345@uni.au.dk",
             "password": "new-password",
         }
     )
@@ -107,7 +107,7 @@ def test_registry_dispatch_lifecycle(monkeypatch):
     status, payload = students_api._dispatch(
         {
             "action": "upsert",
-            "email": "student@example.com",
+            "email": "au612345@uni.au.dk",
             "password": "new-password",
             "package_ids": ["stars"],
             "max_papers_per_week": 4,
@@ -116,7 +116,7 @@ def test_registry_dispatch_lifecycle(monkeypatch):
     assert status == 200
     assert payload["subscription_event"] == "resubscribed"
     assert payload["confirmation_email_sent"] is True
-    assert confirmation_calls[-1] == ("student@example.com", "resubscribed")
+    assert confirmation_calls[-1] == ("au612345@uni.au.dk", "resubscribed")
 
     status, payload = students_api._dispatch(
         {"action": "admin_list", "admin_token": "admin-secret"}
@@ -139,13 +139,14 @@ def test_registry_dispatch_lifecycle(monkeypatch):
 
 def test_manage_page_includes_password_rotation_field():
     page = students_api._manage_page(
-        "student@example.com",
+        "au612345@uni.au.dk",
         "unsubscribe",
         ["stars", "galaxies"],
         4,
     )
 
-    assert "student@example.com" in page
+    assert "612345" in page
+    assert "@uni.au.dk" in page
     assert "New password (optional)" in page
     assert "Enter your password and click Unsubscribe." in page
     assert 'const initialPackages = ["stars", "galaxies"]' in page
@@ -160,7 +161,7 @@ class TestNormaliseEmail:
     """normalise_email now validates format."""
 
     def test_valid_email_is_normalised(self):
-        assert students_api.normalise_email("User@Example.COM") == "user@example.com"
+        assert students_api.normalise_email("AU612345@UNI.AU.DK") == "au612345@uni.au.dk"
 
     def test_email_without_at_raises(self):
         with pytest.raises(ValueError, match="Invalid email"):

@@ -165,7 +165,7 @@ class TestResendConfirmation:
         fake_response = {"content": _b64({"students": {}}), "sha": "abc"}
         with patch.object(students_mod, "_github_request", return_value=fake_response):
             status, result = students_mod._dispatch(
-                {"action": "resend_confirmation", "email": "nobody@uni.au.dk", "password": "x"}
+                {"action": "resend_confirmation", "email": "au999999@uni.au.dk", "password": "x"}
             )
 
         assert status == 404

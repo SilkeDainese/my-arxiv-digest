@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 _EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$")
+_AU_EMAIL_RE = re.compile(r"^au\d{6}@uni\.au\.dk$")
 
 # ─────── Package definitions (synced from setup/data.py) ──────
 
@@ -47,6 +48,8 @@ def normalise_email(email: str) -> str:
     normalised = " ".join(str(email).split()).strip().lower()
     if normalised and not _EMAIL_RE.match(normalised):
         raise ValueError(f"Invalid email address: {normalised!r}")
+    if normalised and not _AU_EMAIL_RE.match(normalised):
+        raise ValueError("Only AU student emails are accepted (auXXXXXX@uni.au.dk).")
     return normalised
 
 
@@ -85,22 +88,26 @@ def hash_password(password: str, *, salt_hex: str | None = None) -> tuple[str, s
     """Hash a password, returning (salt_hex, hash_str).
 
     Format: scheme$params$hex — params embedded for future-proof verification.
+    Falls back to pbkdf2 if scrypt fails at runtime (OpenSSL 3.x memory limits).
     """
     if not password:
         raise ValueError("Password is required.")
     salt = bytes.fromhex(salt_hex) if salt_hex else os.urandom(16)
     scheme = _preferred_password_scheme()
     if scheme == "scrypt":
-        digest = hashlib.scrypt(
-            password.encode("utf-8"), salt=salt,
-            n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P,
-        )
-        params = f"n={_SCRYPT_N},r={_SCRYPT_R},p={_SCRYPT_P}"
-    else:
-        digest = hashlib.pbkdf2_hmac(
-            "sha256", password.encode("utf-8"), salt, _PBKDF2_ITERATIONS,
-        )
-        params = f"iter={_PBKDF2_ITERATIONS}"
+        try:
+            digest = hashlib.scrypt(
+                password.encode("utf-8"), salt=salt,
+                n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P,
+            )
+            params = f"n={_SCRYPT_N},r={_SCRYPT_R},p={_SCRYPT_P}"
+            return salt.hex(), f"{scheme}${params}${digest.hex()}"
+        except (ValueError, OSError):
+            scheme = "pbkdf2_sha256"
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt, _PBKDF2_ITERATIONS,
+    )
+    params = f"iter={_PBKDF2_ITERATIONS}"
     return salt.hex(), f"{scheme}${params}${digest.hex()}"
 
 
@@ -120,9 +127,12 @@ def verify_password(password: str, salt_hex: str, digest_hex: str) -> bool:
         params = dict(kv.split("=") for kv in params_str.split(","))
         if scheme == "scrypt" and hasattr(hashlib, "scrypt"):
             n, r, p = int(params["n"]), int(params["r"]), int(params["p"])
-            candidate = hashlib.scrypt(
-                password.encode("utf-8"), salt=salt, n=n, r=r, p=p,
-            ).hex()
+            try:
+                candidate = hashlib.scrypt(
+                    password.encode("utf-8"), salt=salt, n=n, r=r, p=p,
+                ).hex()
+            except (ValueError, OSError):
+                return False
         else:
             iters = int(params.get("iter", _PBKDF2_ITERATIONS))
             candidate = hashlib.pbkdf2_hmac(
@@ -134,9 +144,12 @@ def verify_password(password: str, salt_hex: str, digest_hex: str) -> bool:
         scheme = parts[0] if len(parts) >= 1 else ""
         stored_hex = parts[-1]
         if scheme == "scrypt" and hasattr(hashlib, "scrypt"):
-            candidate = hashlib.scrypt(
-                password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1,
-            ).hex()
+            try:
+                candidate = hashlib.scrypt(
+                    password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1,
+                ).hex()
+            except (ValueError, OSError):
+                return False
         else:
             candidate = hashlib.pbkdf2_hmac(
                 "sha256", password.encode("utf-8"), salt, 200_000,

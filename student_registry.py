@@ -82,16 +82,19 @@ def hash_password(password: str, *, salt_hex: str | None = None) -> tuple[str, s
     salt = bytes.fromhex(salt_hex) if salt_hex else os.urandom(16)
     scheme = _preferred_password_scheme()
     if scheme == "scrypt":
-        digest = hashlib.scrypt(
-            password.encode("utf-8"), salt=salt,
-            n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P,
-        )
-        params = f"n={_SCRYPT_N},r={_SCRYPT_R},p={_SCRYPT_P}"
-    else:
-        digest = hashlib.pbkdf2_hmac(
-            "sha256", password.encode("utf-8"), salt, _PBKDF2_ITERATIONS,
-        )
-        params = f"iter={_PBKDF2_ITERATIONS}"
+        try:
+            digest = hashlib.scrypt(
+                password.encode("utf-8"), salt=salt,
+                n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P,
+            )
+            params = f"n={_SCRYPT_N},r={_SCRYPT_R},p={_SCRYPT_P}"
+            return salt.hex(), f"{scheme}${params}${digest.hex()}"
+        except (ValueError, OSError):
+            scheme = "pbkdf2_sha256"
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt, _PBKDF2_ITERATIONS,
+    )
+    params = f"iter={_PBKDF2_ITERATIONS}"
     return salt.hex(), f"{scheme}${params}${digest.hex()}"
 
 
@@ -112,9 +115,12 @@ def verify_password(password: str, salt_hex: str, digest_hex: str) -> bool:
         params = dict(kv.split("=") for kv in params_str.split(","))
         if scheme == "scrypt" and hasattr(hashlib, "scrypt"):
             n, r, p = int(params["n"]), int(params["r"]), int(params["p"])
-            candidate = hashlib.scrypt(
-                password.encode("utf-8"), salt=salt, n=n, r=r, p=p,
-            ).hex()
+            try:
+                candidate = hashlib.scrypt(
+                    password.encode("utf-8"), salt=salt, n=n, r=r, p=p,
+                ).hex()
+            except (ValueError, OSError):
+                return False
         else:
             iters = int(params.get("iter", _PBKDF2_ITERATIONS))
             candidate = hashlib.pbkdf2_hmac(
@@ -126,9 +132,12 @@ def verify_password(password: str, salt_hex: str, digest_hex: str) -> bool:
         scheme = parts[0] if len(parts) >= 1 else ""
         stored_hex = parts[-1]
         if scheme == "scrypt" and hasattr(hashlib, "scrypt"):
-            candidate = hashlib.scrypt(
-                password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1,
-            ).hex()
+            try:
+                candidate = hashlib.scrypt(
+                    password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1,
+                ).hex()
+            except (ValueError, OSError):
+                return False
         else:
             candidate = hashlib.pbkdf2_hmac(
                 "sha256", password.encode("utf-8"), salt, 200_000,
