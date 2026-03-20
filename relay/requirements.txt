@@ -1,0 +1,2 @@
+# Relay endpoints use stdlib only — no pip packages needed.
+# This file exists to prevent Vercel from picking up the root requirements.txt.
