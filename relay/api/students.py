@@ -307,17 +307,12 @@ def _manage_page(
         """
         for package_id, label in package_labels().items()
     )
-    status_text = (
-        "Enter your password and click Unsubscribe."
-        if mode == "unsubscribe"
-        else "New here? Choose a password, pick your packages, and hit Subscribe. Already subscribed? Enter your password and load your settings."
-    )
     return f"""<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>AU student subscription</title>
+    <title>AU student digest</title>
     <style>
       :root {{
         --bg: #f6f1e8;
@@ -325,6 +320,7 @@ def _manage_page(
         --text: #1f2933;
         --muted: #5f6c76;
         --accent: #1d5b57;
+        --accent-light: rgba(29, 91, 87, 0.08);
         --danger: #8a3b12;
         --border: #d8d1c6;
       }}
@@ -338,117 +334,254 @@ def _manage_page(
         padding: 24px;
       }}
       main {{
-        width: min(100%, 720px);
+        width: min(100%, 600px);
         margin: 0 auto;
         background: var(--panel);
         border: 1px solid var(--border);
         border-radius: 18px;
-        padding: 28px;
+        padding: 32px;
         box-shadow: 0 18px 48px rgba(31, 41, 51, 0.08);
       }}
       h1 {{
-        margin: 0 0 10px;
-        font-size: clamp(2rem, 5vw, 2.6rem);
-        line-height: 1.05;
+        margin: 0 0 6px;
+        font-size: clamp(1.6rem, 4vw, 2.2rem);
+        line-height: 1.1;
+      }}
+      h2 {{
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        margin: 0 0 12px;
+        font-weight: 600;
       }}
       p, label, button, input {{
-        font-size: 1rem;
+        font-size: 0.95rem;
       }}
       .muted {{
         color: var(--muted);
-        line-height: 1.6;
+        line-height: 1.5;
+        margin: 0 0 20px;
+        font-size: 0.9rem;
       }}
-      .stack {{
-        display: grid;
-        gap: 14px;
-        margin-top: 18px;
+      .section {{
+        margin-bottom: 24px;
       }}
-      input[type="email"], input[type="password"], input[type="number"] {{
+      .section:last-of-type {{
+        margin-bottom: 0;
+      }}
+      .divider {{
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 24px 0;
+      }}
+      .field {{
+        margin-bottom: 12px;
+      }}
+      .field label {{
+        display: block;
+        font-size: 0.82rem;
+        color: var(--muted);
+        margin-bottom: 4px;
+        font-weight: 500;
+      }}
+      input[type="text"], input[type="password"], input[type="number"] {{
         width: 100%;
-        padding: 12px 14px;
-        border-radius: 10px;
+        padding: 10px 12px;
+        border-radius: 8px;
         border: 1px solid var(--border);
         background: white;
+        font-size: 0.95rem;
+      }}
+      input:focus {{
+        outline: 2px solid var(--accent);
+        outline-offset: -1px;
+        border-color: var(--accent);
+      }}
+      .email-row {{
+        display: flex;
+        align-items: center;
+        background: white;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+      }}
+      .email-row:focus-within {{
+        outline: 2px solid var(--accent);
+        outline-offset: -1px;
+        border-color: var(--accent);
+      }}
+      .email-affix {{
+        padding: 10px 0 10px 12px;
+        font-size: 0.9rem;
+        color: var(--muted);
+        font-family: "IBM Plex Mono", monospace;
+        white-space: nowrap;
+        user-select: none;
+        line-height: 1;
+      }}
+      .email-affix:last-child {{
+        padding: 10px 12px 10px 0;
+      }}
+      .email-row input {{
+        border: none;
+        border-radius: 0;
+        width: 72px;
+        padding: 10px 2px;
+        text-align: center;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.9rem;
+        outline: none;
+        background: transparent;
       }}
       .packages {{
         display: grid;
-        gap: 10px;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 8px;
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
       }}
       .package {{
         display: flex;
         align-items: center;
-        gap: 10px;
-        padding: 12px 14px;
+        gap: 8px;
+        padding: 10px 12px;
         border: 1px solid var(--border);
-        border-radius: 12px;
+        border-radius: 10px;
         background: white;
+        cursor: pointer;
+        transition: border-color 0.15s;
       }}
-      .actions {{
-        display: flex;
-        gap: 12px;
-        flex-wrap: wrap;
+      .package:has(input:checked) {{
+        border-color: var(--accent);
+        background: var(--accent-light);
+      }}
+      .package input[type="checkbox"] {{
+        accent-color: var(--accent);
       }}
       button {{
         border: 0;
-        border-radius: 999px;
-        padding: 12px 18px;
+        border-radius: 10px;
+        padding: 11px 20px;
         background: var(--accent);
         color: white;
         cursor: pointer;
+        font-weight: 600;
+        font-size: 0.95rem;
+        transition: opacity 0.15s;
+        width: 100%;
+      }}
+      button:hover {{
+        opacity: 0.9;
       }}
       button.secondary {{
         background: white;
         color: var(--accent);
         border: 1px solid var(--accent);
       }}
-      button.danger {{
-        background: var(--danger);
+      .btn-row {{
+        display: flex;
+        gap: 10px;
+      }}
+      .btn-row button {{
+        flex: 1;
+      }}
+      .text-link {{
+        background: none;
+        border: 0;
+        padding: 0;
+        color: var(--muted);
+        font-size: 0.82rem;
+        cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+        width: auto;
+        font-weight: 400;
+      }}
+      .text-link:hover {{
+        color: var(--text);
+      }}
+      .footer-links {{
+        display: flex;
+        gap: 16px;
+        justify-content: center;
+        margin-top: 20px;
       }}
       .status {{
         margin-top: 16px;
         padding: 12px 14px;
-        border-radius: 12px;
-        background: rgba(29, 91, 87, 0.08);
+        border-radius: 10px;
+        background: var(--accent-light);
         color: var(--accent);
-        min-height: 48px;
+        min-height: 44px;
+        font-size: 0.9rem;
+        line-height: 1.4;
+      }}
+      .status:empty {{
+        display: none;
+      }}
+      .settings-section {{
+        display: none;
+      }}
+      .settings-section.visible {{
+        display: block;
       }}
     </style>
   </head>
   <body>
     <main>
-      <h1>Manage your AU student digest</h1>
-      <p class="muted">{html.escape(status_text)}</p>
-      <div class="stack">
-        <label>AU student ID
-          <div style="display:flex;align-items:center;gap:0;">
-            <span style="padding:8px 0 8px 12px;background:var(--bg-input,#f5f5f5);border:1px solid var(--border,#ccc);border-right:none;border-radius:6px 0 0 6px;font-size:14px;color:#666;">au</span>
-            <input id="email-digits" type="text" inputmode="numeric" pattern="\\d{{6}}" maxlength="6" value="{safe_email.replace('au','').replace('@uni.au.dk','')}" placeholder="612345" style="border-radius:0;border-left:none;border-right:none;width:80px;text-align:center;font-family:monospace;">
-            <span style="padding:8px 12px 8px 0;background:var(--bg-input,#f5f5f5);border:1px solid var(--border,#ccc);border-left:none;border-radius:0 6px 6px 0;font-size:14px;color:#666;">@uni.au.dk</span>
+      <h1>AU student digest</h1>
+      <p class="muted">Weekly arXiv picks, scored for your interests.</p>
+
+      <!-- ── Section 1: Identity + Load ── -->
+      <div class="section">
+        <h2>Sign in</h2>
+        <div class="field">
+          <label for="email-digits">AU student ID</label>
+          <div class="email-row">
+            <span class="email-affix">au</span>
+            <input id="email-digits" type="text" inputmode="numeric" pattern="\\d{{6}}" maxlength="6" value="{safe_email.replace('au','').replace('@uni.au.dk','')}" placeholder="612345">
+            <span class="email-affix">@uni.au.dk</span>
           </div>
-        </label>
-        <label>Password
-          <input id="password" type="password" placeholder="Your student digest password">
-        </label>
-        <label>New password (optional)
-          <input id="new_password" type="password" placeholder="Leave blank to keep your current password">
-        </label>
-        <label>Max papers per week
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" type="password" placeholder="Choose a password (new) or enter yours (returning)">
+        </div>
+        <button class="secondary" type="button" onclick="loadCurrent()">Load my settings</button>
+      </div>
+
+      <hr class="divider">
+
+      <!-- ── Section 2: Settings (always visible, populated on load) ── -->
+      <div class="section" id="settings-section">
+        <h2>Your packages</h2>
+        <div class="packages" style="margin-bottom: 14px;">
+          {packages_markup}
+        </div>
+        <div class="field">
+          <label for="max_papers">Max papers per week</label>
           <input id="max_papers" type="number" min="1" max="20" value="{DEFAULT_MAX_PAPERS}">
-        </label>
-        <div>
-          <strong>Packages</strong>
-          <div class="packages">
-            {packages_markup}
-          </div>
         </div>
-        <div class="actions">
-          <button class="secondary" type="button" onclick="loadCurrent()">Load current settings</button>
+        <div class="field">
+          <label for="new_password">New password (optional)</label>
+          <input id="new_password" type="password" placeholder="Leave blank to keep current">
+        </div>
+      </div>
+
+      <hr class="divider">
+
+      <!-- ── Section 3: Actions ── -->
+      <div class="section">
+        <div class="btn-row">
           <button id="save-btn" type="button" onclick="saveSubscription()">Subscribe</button>
-          <button class="secondary" type="button" onclick="resendConfirmation()">Resend confirmation email</button>
-          <button class="danger" type="button" onclick="unsubscribe()">Unsubscribe</button>
         </div>
-        <div id="status" class="status"></div>
+      </div>
+
+      <div id="status" class="status"></div>
+
+      <!-- ── Footer: rare actions as text links ── -->
+      <div class="footer-links">
+        <button class="text-link" type="button" onclick="resendConfirmation()">Resend confirmation email</button>
+        <button class="text-link" type="button" onclick="handleUnsubscribe()" style="color: var(--danger);">Unsubscribe</button>
       </div>
     </main>
     <script>
@@ -473,6 +606,7 @@ def _manage_page(
         statusEl.textContent = message;
         statusEl.style.background = isError ? "rgba(138, 59, 18, 0.08)" : "rgba(29, 91, 87, 0.08)";
         statusEl.style.color = isError ? "var(--danger)" : "var(--accent)";
+        statusEl.style.display = message ? "block" : "none";
       }}
 
       function getEmail() {{
@@ -505,32 +639,33 @@ def _manage_page(
       }}
 
       async function loadCurrent() {{
-        setStatus("Loading current settings...");
+        setStatus("Loading...");
         try {{
           const data = await callApi("get");
           document.getElementById("max_papers").value = data.subscription.max_papers_per_week;
           setPackages(data.subscription.package_ids);
-          document.getElementById("save-btn").textContent = "Save packages";
-          setStatus("Loaded current settings.");
+          document.getElementById("save-btn").textContent = "Save changes";
+          setStatus("Settings loaded. Edit below and save.");
         }} catch (error) {{
           setStatus(error.message, true);
         }}
       }}
 
       async function saveSubscription() {{
-        setStatus("Saving subscription...");
+        setStatus("Saving...");
         try {{
           const data = await callApi("upsert");
           setPackages(data.subscription.package_ids);
           document.getElementById("max_papers").value = data.subscription.max_papers_per_week;
           document.getElementById("new_password").value = "";
-          const confirmationMessage = "Confirmed. First digest will arrive next Monday at 07:00 UTC.";
+          document.getElementById("save-btn").textContent = "Save changes";
+          const msg = "Saved. First digest arrives next Monday at 07:00 UTC.";
           if (data.confirmation_email_sent) {{
-            setStatus(confirmationMessage + " A confirmation email has been sent.");
+            setStatus(msg + " Confirmation email sent.");
           }} else if (data.confirmation_email_error) {{
-            setStatus(confirmationMessage + " Confirmation email could not be sent: " + data.confirmation_email_error, true);
+            setStatus(msg + " Confirmation email failed: " + data.confirmation_email_error, true);
           }} else {{
-            setStatus(confirmationMessage);
+            setStatus(msg);
           }}
         }} catch (error) {{
           setStatus(error.message, true);
@@ -542,7 +677,7 @@ def _manage_page(
         try {{
           const data = await callApi("resend_confirmation");
           if (data.confirmation_email_sent) {{
-            setStatus("Confirmation email sent. Check your inbox (and spam folder).");
+            setStatus("Confirmation email sent. Check your inbox and spam folder.");
           }} else {{
             setStatus("Could not send: " + (data.confirmation_email_error || "unknown error"), true);
           }}
@@ -551,26 +686,25 @@ def _manage_page(
         }}
       }}
 
-      async function unsubscribe() {{
-        if (!confirm("Stop sending the AU student digest to this email?")) {{
+      async function handleUnsubscribe() {{
+        if (!confirm("Stop receiving the AU student digest at this email?")) {{
           return;
         }}
         setStatus("Unsubscribing...");
         try {{
           await callApi("unsubscribe");
-          setStatus("Unsubscribed. You can re-enable it later by saving packages again.");
+          setStatus("Unsubscribed. You can re-subscribe any time.");
         }} catch (error) {{
           setStatus(error.message, true);
         }}
       }}
 
-      if (mode === "unsubscribe") {{
-        setStatus("Enter your password and click Unsubscribe.");
-      }} else {{
-        setStatus("Enter your password, then load or save your package choices.");
-      }}
+      // Initialise
       document.getElementById("max_papers").value = initialMaxPapers;
       setPackages(initialPackages);
+      if (mode === "unsubscribe") {{
+        setStatus("Enter your password, then click Unsubscribe below.");
+      }}
     </script>
   </body>
 </html>"""
