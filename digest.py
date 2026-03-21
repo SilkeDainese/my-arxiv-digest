@@ -1127,7 +1127,7 @@ def _analyse_with_gemini(papers: list[dict[str, Any]], config: dict[str, Any], a
 
         try:
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 contents=prompt,
             )
             text = response.text.strip()
@@ -1164,7 +1164,7 @@ def _analyse_with_gemini(papers: list[dict[str, Any]], config: dict[str, Any], a
                 time.sleep(backoff)
                 try:
                     response = client.models.generate_content(
-                        model="gemini-2.0-flash",
+                        model="gemini-2.5-flash",
                         contents=prompt,
                     )
                     text = response.text.strip()
