@@ -301,7 +301,7 @@
     <div class="field" style="flex:1;">
       <label>Gemini API key (Google's AI &mdash; free)</label>
       <input class="ai-key-input" placeholder="AIza..." id="gemini-key">
-      <div class="note"><a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--pine);">Get a free key &rarr;</a> aistudio.google.com</div>
+      <div class="note"><a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--pine);">Get a free key &rarr;</a> aistudio.google.com</div>
       <div class="note" style="margin-top:1px;">Free to all with a Google account</div>
     </div>
     <div style="margin-top:20px;color:var(--warm-grey);font-size:12px;flex-shrink:0;text-align:center;">or</div>
@@ -322,7 +322,7 @@
     <div class="step-header" onclick="toggleStep('step-1')"><span class="step-num">1</span><span class="step-title">About You</span><span class="step-summary" id="sum-step-1"></span><span class="step-badge">optional</span><span class="step-chevron">&#x276F;</span></div>
     <div class="step-body">
       <div style="background:var(--pine-wash);border:1px solid #c0d4c6;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:var(--pine);">Already set up? <span style="text-decoration:underline;cursor:pointer;" onclick="openUpload()">Upload your config.yaml to edit your settings.</span></div>
-      <p>Enter your ORCID to auto-fill your profile, research description, and more. Or skip and fill manually.</p>
+      <p>If you have an ORCID, we can auto-fill your profile from your publications. Otherwise, fill in your research focus below &mdash; it works just as well.</p>
 
       <details style="font-size:11px;color:var(--warm-grey);margin:-4px 0 12px;">
         <summary style="cursor:pointer;font-size:11px;">What is ORCID?</summary>
@@ -410,7 +410,7 @@
 
       <div style="margin-top:14px;">
         <button class="btn-primary" onclick="done('step-1');go('step-2')">Continue &rarr;</button>
-        <span id="skip-orcid-link" style="font-size:12px;color:var(--warm-grey);margin-left:12px;cursor:pointer;text-decoration:underline;" onclick="document.getElementById('manual-profile').style.display='block';this.style.display='none';">No ORCID? Fill manually &darr;</span>
+        <span id="skip-orcid-link" style="font-size:12px;color:var(--warm-grey);margin-left:12px;cursor:pointer;text-decoration:underline;" onclick="document.getElementById('manual-profile').style.display='block';this.style.display='none';">Skip auto-fill &mdash; I'll type it myself</span>
       </div>
     </div>
   </div>
@@ -426,6 +426,7 @@
       <div class="section-desc">The AI reads this daily to score every paper. More specific = better results. Mention your methods, targets, instruments, and what makes a paper relevant to you.</div>
       <div class="field" style="margin-bottom:14px;">
         <div class="mock-textarea" id="research-desc-step2" contenteditable="true" spellcheck="false" style="min-height:70px;" data-placeholder="Describe your research like you'd tell a colleague...">Describe your research like you'd tell a colleague...</div>
+        <div id="step2-orcid-note" style="display:none;font-size:11px;color:var(--pine);margin-top:4px;">Pre-filled from your ORCID publications &mdash; edit freely.</div>
       </div>
 
       <!-- Auto-fill button (single action: categories + keywords) -->
@@ -455,6 +456,7 @@
           <input type="text" id="kw-input" class="ai-key-input" placeholder="Add a keyword..." style="flex:3;border-radius:6px;" autocomplete="off" onkeydown="if(event.key==='Enter'){addKeyword(this.value);event.preventDefault();}">
           <button class="btn-secondary" style="flex-shrink:0;padding:7px 14px;" onclick="addKeyword(document.getElementById('kw-input').value)">Add</button>
         </div>
+        <div class="note" style="margin-top:6px;">Each keyword starts at weight 7 (main interest). Open Advanced settings below to fine-tune weights from 1&ndash;10.</div>
       </div>
 
       <!-- Advanced keyword settings (hidden by default) -->
@@ -528,16 +530,7 @@
       </div>
 
       <div class="explainer" style="margin-top:12px;">
-        Everyone you add gets their own section in the digest, even if their papers are off-topic for you.
-      </div>
-
-      <!-- Advanced: reclassify -->
-      <div style="margin-top:8px;">
-        <span class="section-desc" style="cursor:pointer;color:var(--pine);text-decoration:underline;margin:0;" onclick="toggleAdvanced(this,'advanced-people')">Advanced: colleague vs. research author &#x2193;</span>
-        <div id="advanced-people" style="display:none;margin-top:8px;padding:12px;background:var(--ash-white);border:1px solid var(--card-border);border-radius:6px;">
-          <div class="section-desc" style="margin:0 0 8px;">By default, everyone is a <strong>colleague</strong> (always shown). Reclassify as <strong>research author</strong> to give a scoring boost instead &mdash; they may be filtered if too off-topic.</div>
-          <div style="font-size:12px;color:var(--warm-grey);font-style:italic;">Add people above first, then reclassify here.</div>
-        </div>
+        Everyone you add gets their own section in the digest, even if their papers are off-topic for you. To give someone a scoring boost instead (they may be filtered if off-topic), mark them as a research author in your config.yaml after download.
       </div>
 
       <button class="btn-primary" onclick="done('step-3');go('step-4')" style="margin-top:14px;">Continue &rarr;</button>
@@ -634,7 +627,7 @@
             <div class="field"><label>Email provider</label>
               <div class="radio-group" style="margin:4px 0 0;"><div class="radio-option active" onclick="setRadio(this)" style="padding:8px;"><div style="font-weight:600;font-size:12px;">Gmail</div></div><div class="radio-option" onclick="setRadio(this)" style="padding:8px;"><div style="font-weight:600;font-size:12px;">Outlook</div></div></div>
             </div>
-            <div class="field"><label>Send time (UTC)</label><input type="time" class="mock-input filled" id="send-time-field" value="07:00" style="font-style:normal;color:var(--ash-black);text-align:center;"><div class="note">When it lands in your inbox.</div></div>
+            <div class="field"><label>Send time (UTC)</label><input type="time" class="mock-input filled" id="send-time-field" value="07:00" style="font-style:normal;color:var(--ash-black);text-align:center;"><div class="note">Sets send_hour_utc in your config. Actual delivery schedule is controlled by the GitHub Actions workflow.</div></div>
           </div>
           <div class="field-row" style="margin-top:8px;">
             <div class="field"><label>Min score (1&ndash;10)</label><input type="number" class="mock-input filled" id="min-score-field" min="1" max="10" value="5" style="font-style:normal;color:var(--ash-black);text-align:center;"><div class="note">Papers below this are dropped. Set by Digest size above.</div></div>
@@ -737,7 +730,7 @@
         </tr>
         <tr style="border-bottom:1px solid var(--card-border);">
           <td style="padding:8px 10px;"><code style="background:var(--pine-wash);color:var(--pine);padding:2px 6px;border-radius:3px;font-family:'DM Mono',monospace;font-size:11px;">GEMINI_API_KEY</code></td>
-          <td style="padding:8px 10px;color:var(--warm-grey);">Google's AI key — used to read and score each paper against your research description. <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--pine);">Get free key &rarr;</a></td>
+          <td style="padding:8px 10px;color:var(--warm-grey);">Google's AI key — used to read and score each paper against your research description. <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--pine);">Get free key &rarr;</a></td>
           <td style="text-align:center;padding:8px 10px;font-size:11px;color:var(--warm-grey);">Free</td>
         </tr>
         <tr>
@@ -1263,6 +1256,9 @@ async function simulateOrcidV2(){
       descStep2.style.color = 'var(--ash-black)';
       descStep2.style.fontStyle = 'normal';
     }
+    // Show ORCID pre-fill note in Step 2
+    const step2OrcidNote = document.getElementById('step2-orcid-note');
+    if(step2OrcidNote) step2OrcidNote.style.display = 'block';
 
     // Update autofill bar text with actual paper count
     const autofillDesc = document.getElementById('autofill-desc');
