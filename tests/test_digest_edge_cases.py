@@ -369,3 +369,99 @@ class TestEmptyFinalPapersLog:
         captured = capsys.readouterr()
         assert "all scored below min_score" in captured.out
         mock_send.assert_called_once()
+
+
+# ─────────────────────────────────────────────────────────────
+#  fetch_arxiv_papers — uses real primary_category from XML
+# ─────────────────────────────────────────────────────────────
+
+
+class TestFetchUsesRealPrimaryCategory:
+    """fetch_arxiv_papers must assign the paper's true primary_category, not the query category.
+
+    Regression: cross-listed papers (e.g. primary astro-ph.GA appearing in
+    astro-ph.SR results) were assigned the query loop variable as their
+    category, causing wrong labelling downstream.
+    """
+
+    def test_cross_listed_paper_gets_real_primary_category(self):
+        """A paper fetched via astro-ph.SR whose real primary is astro-ph.GA must get astro-ph.GA."""
+        config = {
+            "categories": ["astro-ph.SR"],
+            "days_back": 7,
+            "research_authors": [],
+            "colleagues": {"people": [], "institutions": []},
+            "keywords": {"galaxy": 8},
+            "keyword_aliases": {},
+            "self_match": [],
+        }
+
+        # The paper's real primary category is astro-ph.GA, but it appears
+        # in the astro-ph.SR query results (cross-listing).
+        fake_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2501.99999v1</id>
+    <published>2099-01-01T00:00:00Z</published>
+    <title>Galaxy dynamics in clusters</title>
+    <summary>We study galaxy rotation curves.</summary>
+    <author><name>Doe, J.</name></author>
+    <arxiv:primary_category xmlns:arxiv="http://arxiv.org/schemas/atom" term="astro-ph.GA"/>
+  </entry>
+</feed>"""
+
+        class FakeResponse:
+            def read(self):
+                return fake_xml.encode()
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+
+        with patch("urllib.request.urlopen", return_value=FakeResponse()):
+            papers = d.fetch_arxiv_papers(config)
+
+        assert len(papers) == 1
+        assert papers[0]["category"] == "astro-ph.GA", (
+            f"Expected real primary category 'astro-ph.GA' but got '{papers[0]['category']}'"
+        )
+
+    def test_missing_primary_category_falls_back_to_query_category(self):
+        """When primary_category element is absent, fall back to the query category."""
+        config = {
+            "categories": ["astro-ph.SR"],
+            "days_back": 7,
+            "research_authors": [],
+            "colleagues": {"people": [], "institutions": []},
+            "keywords": {"stellar": 8},
+            "keyword_aliases": {},
+            "self_match": [],
+        }
+
+        # XML without the arxiv:primary_category element
+        fake_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2501.88888v1</id>
+    <published>2099-01-01T00:00:00Z</published>
+    <title>Stellar activity cycles</title>
+    <summary>We measure stellar activity.</summary>
+    <author><name>Doe, J.</name></author>
+  </entry>
+</feed>"""
+
+        class FakeResponse:
+            def read(self):
+                return fake_xml.encode()
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+
+        with patch("urllib.request.urlopen", return_value=FakeResponse()):
+            papers = d.fetch_arxiv_papers(config)
+
+        assert len(papers) == 1
+        assert papers[0]["category"] == "astro-ph.SR", (
+            f"Expected fallback category 'astro-ph.SR' but got '{papers[0]['category']}'"
+        )

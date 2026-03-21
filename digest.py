@@ -641,6 +641,14 @@ def fetch_arxiv_papers(config: dict[str, Any]) -> list[dict[str, Any]]:
                 skipped_malformed += 1
                 continue
 
+            # Use the paper's actual primary category, not the query category
+            primary_cat_el = entry.find("{http://arxiv.org/schemas/atom}primary_category")
+            paper_category = (
+                primary_cat_el.get("term", category)
+                if primary_cat_el is not None
+                else category
+            )
+
             # Check research authors (relevance boost)
             known_flag = []
             for author in authors:
@@ -721,7 +729,7 @@ def fetch_arxiv_papers(config: dict[str, Any]) -> list[dict[str, Any]]:
                 "authors": authors,
                 "author_affiliations": author_affiliations,
                 "published": published.strftime("%Y-%m-%d"),
-                "category": category,
+                "category": paper_category,
                 "url": f"https://arxiv.org/abs/{arxiv_id}",
                 "known_authors": known_flag,
                 "colleague_matches": colleague_flag,
