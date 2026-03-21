@@ -74,6 +74,46 @@ class TestOrcidLookup:
 
 
 # ─────────────────────────────────────────────────────────────
+#  /api/categories
+# ─────────────────────────────────────────────────────────────
+
+
+class TestCategories:
+    def test_returns_groups_hints_categories(self, client):
+        resp = client.get("/api/categories")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "groups" in data
+        assert "hints" in data
+        assert "categories" in data
+
+    def test_groups_contain_astrophysics(self, client):
+        resp = client.get("/api/categories")
+        data = resp.get_json()
+        assert "Astrophysics" in data["groups"]
+        assert "astro-ph.EP" in data["groups"]["Astrophysics"]
+
+    def test_categories_has_all_astro_codes(self, client):
+        resp = client.get("/api/categories")
+        data = resp.get_json()
+        for code in ["astro-ph.EP", "astro-ph.SR", "astro-ph.GA", "astro-ph.CO", "astro-ph.HE", "astro-ph.IM"]:
+            assert code in data["categories"]
+
+    def test_hints_match_group_names(self, client):
+        resp = client.get("/api/categories")
+        data = resp.get_json()
+        for group_name in data["groups"]:
+            assert group_name in data["hints"], f"Missing hint for group: {group_name}"
+
+    def test_all_group_codes_exist_in_categories(self, client):
+        resp = client.get("/api/categories")
+        data = resp.get_json()
+        for group_name, codes in data["groups"].items():
+            for code in codes:
+                assert code in data["categories"], f"{code} in group {group_name} not in categories"
+
+
+# ─────────────────────────────────────────────────────────────
 #  /api/ai/test-key
 # ─────────────────────────────────────────────────────────────
 

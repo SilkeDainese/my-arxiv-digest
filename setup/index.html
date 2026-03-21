@@ -338,7 +338,7 @@
 
           <div class="section-label">Research description</div>
           <div class="section-desc">Auto-generated from your 23 publications. Edit freely &mdash; the AI reads this daily to score papers.</div>
-          <div class="field"><div class="mock-textarea" id="research-desc" style="min-height:80px;color:var(--ash-black);font-style:normal;">I study stellar rotation and gyrochronology in open clusters, using photometric time-series data from Kepler, K2, and TESS. My focus is on calibrating the rotation&ndash;age relation for FGK dwarfs and understanding how magnetic braking shapes spin-down.</div></div>
+          <div class="field"><div class="mock-textarea" id="research-desc" contenteditable="true" spellcheck="false" style="min-height:80px;color:var(--ash-black);font-style:normal;">I study stellar rotation and gyrochronology in open clusters, using photometric time-series data from Kepler, K2, and TESS. My focus is on calibrating the rotation&ndash;age relation for FGK dwarfs and understanding how magnetic braking shapes spin-down.</div></div>
         </div>
       </div>
 
@@ -383,28 +383,26 @@
     <div class="step-body">
       <p>Which arXiv categories to scan, and which topics to look for.</p>
 
+      <!-- Research description (the most important field — AI reads this daily) -->
+      <div class="section-label">Your research focus</div>
+      <div class="section-desc">The AI reads this daily to score every paper. More specific = better results.</div>
+      <div class="field" style="margin-bottom:14px;">
+        <div class="mock-textarea" id="research-desc-step2" contenteditable="true" spellcheck="false" style="min-height:70px;" data-placeholder="Describe your research like you'd tell a colleague...">Describe your research like you'd tell a colleague...</div>
+      </div>
+
       <!-- Auto-fill button (single action: categories + keywords) -->
       <div id="autofill-bar" style="background:var(--gold-wash);border:1px solid #e8d47a;border-radius:8px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;">
-        <div><div style="font-size:12px;font-weight:600;color:#8a6f00;">Auto-fill from publications</div><div style="font-size:11px;color:#a08520;margin-top:1px;">Suggests categories and keywords from your 23 papers.</div></div>
+        <div><div style="font-size:12px;font-weight:600;color:#8a6f00;">Auto-fill from publications</div><div style="font-size:11px;color:#a08520;margin-top:1px;" id="autofill-desc">Suggests categories and keywords from your research description.</div></div>
         <button class="btn-secondary" style="border-color:#e8d47a;color:#8a6f00;white-space:nowrap;" onclick="autoFillAll()" id="autofill-btn">Auto-fill</button>
       </div>
       <div id="autofill-status" style="display:none;font-family:'DM Mono',monospace;font-size:11px;color:var(--pine);margin-bottom:8px;"></div>
 
-      <!-- arXiv Categories -->
+      <!-- arXiv Categories (rendered dynamically from /api/categories) -->
       <div class="section-label">arXiv categories</div>
       <div class="section-desc">Papers outside these categories are ignored.</div>
 
       <div id="cat-container">
-        <div class="cat-expander" id="cat-astro">
-          <div class="cat-expander-header" onclick="toggleCat('cat-astro')"><span class="cat-expander-name">Astrophysics</span><div class="cat-expander-meta"><span class="cat-count" id="cat-astro-count">0/6</span><span class="cat-expander-chevron">&#x276F;</span></div></div>
-          <div class="cat-expander-body">
-            <div class="chip-group" id="cat-astro-chips"><span class="chip chip-ghost" style="font-style:normal;">astro-ph.SR</span><span class="chip chip-ghost" style="font-style:normal;">astro-ph.EP</span><span class="chip chip-ghost" style="font-style:normal;">astro-ph.GA</span><span class="chip chip-ghost" style="font-style:normal;">astro-ph.IM</span><span class="chip chip-ghost" style="font-style:normal;">astro-ph.CO</span><span class="chip chip-ghost" style="font-style:normal;">astro-ph.HE</span></div>
-            <div style="display:flex;gap:8px;margin-top:8px;"><button class="btn-clear" onclick="selectAllCats('cat-astro')">Select all</button><button class="btn-clear" onclick="clearGroupCats('cat-astro')">Clear</button></div>
-          </div>
-        </div>
-        <div class="cat-expander" id="cat-physics"><div class="cat-expander-header" onclick="toggleCat('cat-physics')"><span class="cat-expander-name">Physics</span><div class="cat-expander-meta"><span class="cat-count">0/12</span><span class="cat-expander-chevron">&#x276F;</span></div></div><div class="cat-expander-body"><div class="chip-group"><span class="chip chip-ghost" style="font-style:normal;">hep-th</span><span class="chip chip-ghost" style="font-style:normal;">hep-ph</span><span class="chip chip-ghost" style="font-style:normal;">hep-ex</span><span class="chip chip-ghost" style="font-style:normal;">gr-qc</span><span class="chip chip-ghost" style="font-style:normal;">nucl-th</span><span class="chip chip-ghost" style="font-style:normal;">quant-ph</span></div></div></div>
-        <div class="cat-expander" id="cat-cs"><div class="cat-expander-header" onclick="toggleCat('cat-cs')"><span class="cat-expander-name">Computer Science</span><div class="cat-expander-meta"><span class="cat-count">0/40</span><span class="cat-expander-chevron">&#x276F;</span></div></div><div class="cat-expander-body"><div class="chip-group"><span class="chip chip-ghost" style="font-style:normal;">cs.AI</span><span class="chip chip-ghost" style="font-style:normal;">cs.LG</span><span class="chip chip-ghost" style="font-style:normal;">cs.CV</span><span class="chip chip-ghost" style="font-style:normal;">cs.CL</span></div></div></div>
-        <div class="cat-expander" id="cat-math"><div class="cat-expander-header" onclick="toggleCat('cat-math')"><span class="cat-expander-name">Mathematics</span><div class="cat-expander-meta"><span class="cat-count">0/32</span><span class="cat-expander-chevron">&#x276F;</span></div></div><div class="cat-expander-body"><div class="chip-group"><span class="chip chip-ghost" style="font-style:normal;">math.ST</span><span class="chip chip-ghost" style="font-style:normal;">math.NA</span></div></div></div>
+        <div style="padding:16px;text-align:center;color:var(--warm-grey);font-size:12px;">Loading categories...</div>
       </div>
 
       <!-- Keywords as simple chips -->
@@ -1182,6 +1180,17 @@ async function simulateOrcidV2(){
       descEl.style.color = 'var(--ash-black)';
       descEl.style.fontStyle = 'normal';
     }
+    // Sync to Step 2's research description field
+    const descStep2 = document.getElementById('research-desc-step2');
+    if(descStep2 && data.research_description) {
+      descStep2.textContent = data.research_description;
+      descStep2.style.color = 'var(--ash-black)';
+      descStep2.style.fontStyle = 'normal';
+    }
+
+    // Update autofill bar text with actual paper count
+    const autofillDesc = document.getElementById('autofill-desc');
+    if(autofillDesc) autofillDesc.textContent = `Suggests categories and keywords from your ${data.paper_count} papers.`;
 
     // Fill paper count in autofill description
     const descMeta = document.querySelector('#orcid-result .section-desc');
@@ -1209,16 +1218,14 @@ async function autoFillAll(){
   btn.textContent = 'Working...'; btn.style.opacity = '.6';
   st.style.display = 'block'; st.textContent = 'Analysing your publications...';
 
-  // Get research description from the form
-  const descEl = document.getElementById('research-desc') || document.getElementById('research-desc-manual');
-  const text = descEl?.textContent?.trim() || '';
-  if(!text) {
-    st.textContent = 'Write a research description first (Step 1)';
-    btn.textContent = 'Auto-fill'; btn.style.opacity = '1';
-    return;
-  }
-  if(!state.orcidData) {
-    st.textContent = 'Look up your ORCID first (Step 1) to get the best suggestions';
+  // Get research description — prefer Step 2 field, fall back to Step 1
+  const descStep2 = document.getElementById('research-desc-step2');
+  const descStep1 = document.getElementById('research-desc') || document.getElementById('research-desc-manual');
+  const step2Text = descStep2?.textContent?.trim() || '';
+  const step2Placeholder = descStep2?.dataset?.placeholder || '';
+  const text = (step2Text && step2Text !== step2Placeholder) ? step2Text : (descStep1?.textContent?.trim() || '');
+  if(!text || text === 'Describe your research like you\'d tell a colleague...' || text === 'Write your research focus here...') {
+    st.textContent = 'Write a research description first (above or in Step 1)';
     btn.textContent = 'Auto-fill'; btn.style.opacity = '1';
     return;
   }
@@ -1229,7 +1236,7 @@ async function autoFillAll(){
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
         research_description: text,
-        orcid_keywords: state.orcidData.keywords || null,
+        orcid_keywords: state.orcidData?.keywords || null,
         ...getAIKeys(),
       }),
     });
@@ -1239,26 +1246,19 @@ async function autoFillAll(){
     // Fill categories
     const cats = data.categories || [];
     state.selectedCats = cats;
-    const catChips = document.getElementById('cat-astro-chips');
-    if(catChips) {
-      catChips.querySelectorAll('.chip').forEach(c => {
-        const name = c.textContent.replace(/\s*\u00d7\s*/, '').trim();
-        if(cats.includes(name)) {
-          c.className = 'chip chip-pine';
-          c.innerHTML = name + ' <span class="remove" onclick="unselectCat(this)">&times;</span>';
-        }
-      });
-      // Also check other group expanders
-      document.querySelectorAll('#cat-container .chip').forEach(c => {
-        const name = c.textContent.replace(/\s*\u00d7\s*/, '').trim();
-        if(cats.includes(name)) {
-          c.className = 'chip chip-pine';
-          c.innerHTML = name + ' <span class="remove" onclick="unselectCat(this)">&times;</span>';
-        }
-      });
-    }
-    document.getElementById('cat-astro-count').textContent = cats.filter(c => c.startsWith('astro-ph')).length + '/6';
-    document.getElementById('cat-astro').classList.add('open');
+    // Select matching chips and open their groups
+    document.querySelectorAll('#cat-container .chip').forEach(c => {
+      const name = c.textContent.replace(/\s*\u00d7\s*/, '').trim();
+      if(cats.includes(name)) {
+        c.className = 'chip chip-pine';
+        c.innerHTML = name + ' <span class="remove" onclick="event.stopPropagation();unselectCat(this)">&times;</span>';
+        c.onclick = null;
+        const expander = c.closest('.cat-expander');
+        if(expander) expander.classList.add('open');
+      }
+    });
+    // Update all group counters
+    document.querySelectorAll('#cat-container .cat-expander').forEach(updateCatCount);
 
     // Fill keywords
     const kws = data.keywords || {};
@@ -1393,7 +1393,10 @@ function clearColleagues(){
 
 // ── Config download (real API) ──
 async function downloadConfig(){
-  const descEl = document.getElementById('research-desc') || document.getElementById('research-desc-manual');
+  const descStep2 = document.getElementById('research-desc-step2');
+  const step2Text = descStep2?.textContent?.trim() || '';
+  const step2Placeholder = descStep2?.dataset?.placeholder || '';
+  const descEl = (step2Text && step2Text !== step2Placeholder) ? descStep2 : (document.getElementById('research-desc') || document.getElementById('research-desc-manual'));
   const nameField = document.querySelector('#orcid-result .mock-input.autofilled');
   const instFields = document.querySelectorAll('#orcid-result .mock-input.autofilled');
 
@@ -1776,20 +1779,52 @@ function clearGroupCats(groupId) {
   });
 }
 
-// ── Wire all category chips on load ──
+// ── Wire all category chips ──
 function initCatChips() {
   document.querySelectorAll('#cat-container .cat-expander-body .chip-ghost').forEach(chip => {
     const name = chip.textContent.trim();
     chip.onclick = () => selectCat(chip, name);
   });
-  // Init counters
   document.querySelectorAll('#cat-container .cat-expander').forEach(updateCatCount);
+}
+
+// ── Dynamic category rendering from API ──
+async function renderCategories() {
+  const container = document.getElementById('cat-container');
+  try {
+    const resp = await fetch('/api/categories');
+    const data = await resp.json();
+    const groups = data.groups || {};
+    const hints = data.hints || {};
+    const catNames = data.categories || {};
+    container.innerHTML = '';
+    for (const [groupName, codes] of Object.entries(groups)) {
+      const groupId = 'cat-' + groupName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      const hint = hints[groupName] || '';
+      const expander = document.createElement('div');
+      expander.className = 'cat-expander';
+      expander.id = groupId;
+      expander.innerHTML = `<div class="cat-expander-header" onclick="toggleCat('${groupId}')"><span class="cat-expander-name">${escapeHtml(groupName)}</span><div class="cat-expander-meta">${hint ? `<span style="font-size:11px;color:var(--warm-grey);margin-right:6px;display:none;" class="cat-hint">${escapeHtml(hint)}</span>` : ''}<span class="cat-count">0/${codes.length}</span><span class="cat-expander-chevron">&#x276F;</span></div></div>`
+        + `<div class="cat-expander-body"><div class="chip-group">${codes.map(code => `<span class="chip chip-ghost" style="font-style:normal;" title="${escapeHtml(catNames[code] || code)}">${escapeHtml(code)}</span>`).join('')}</div><div style="display:flex;gap:8px;margin-top:8px;"><button class="btn-clear" onclick="selectAllCats('${groupId}')">Select all</button><button class="btn-clear" onclick="clearGroupCats('${groupId}')">Clear</button></div></div>`;
+      container.appendChild(expander);
+    }
+    initCatChips();
+  } catch(e) {
+    container.innerHTML = '<div style="padding:12px;color:#C0392B;font-size:12px;">Failed to load categories. Reload the page to try again.</div>';
+  }
 }
 
 // ── Fill form from uploaded config ──
 function fillFromConfig(cfg) {
   state.orcidData = null;  // clear stale ORCID data so AI calls use the loaded config
   document.getElementById('orcid-result').style.display = 'none';  // hide stale ORCID card
+  // Research description
+  if(cfg.research_context) {
+    const descStep2 = document.getElementById('research-desc-step2');
+    if(descStep2) { descStep2.textContent = cfg.research_context; descStep2.style.color = 'var(--ash-black)'; descStep2.style.fontStyle = 'normal'; }
+    const descStep1 = document.getElementById('research-desc');
+    if(descStep1) { descStep1.textContent = cfg.research_context; descStep1.style.color = 'var(--ash-black)'; descStep1.style.fontStyle = 'normal'; }
+  }
   // Categories
   if(Array.isArray(cfg.categories) && cfg.categories.length) {
     // Clear existing
@@ -1846,8 +1881,37 @@ document.querySelectorAll('[contenteditable][data-placeholder]').forEach(el => {
   });
 });
 
+// ── Sync research description between Step 1 and Step 2 ──
+function syncResearchDesc(sourceId) {
+  const step1 = document.getElementById('research-desc');
+  const step1m = document.getElementById('research-desc-manual');
+  const step2 = document.getElementById('research-desc-step2');
+  const placeholder2 = step2?.dataset?.placeholder || '';
+  if(sourceId === 'research-desc-step2') {
+    const text = step2?.textContent?.trim() || '';
+    if(text && text !== placeholder2) {
+      if(step1) { step1.textContent = text; step1.style.color = 'var(--ash-black)'; step1.style.fontStyle = 'normal'; }
+      if(step1m) { step1m.textContent = text; step1m.style.color = 'var(--ash-black)'; step1m.style.fontStyle = 'normal'; }
+    }
+  } else {
+    const src = document.getElementById(sourceId);
+    const srcPlaceholder = src?.dataset?.placeholder || '';
+    const text = src?.textContent?.trim() || '';
+    if(text && text !== srcPlaceholder && step2) {
+      step2.textContent = text;
+      step2.style.color = 'var(--ash-black)';
+      step2.style.fontStyle = 'normal';
+    }
+  }
+}
+// Sync on blur for all research desc fields
+['research-desc', 'research-desc-manual', 'research-desc-step2'].forEach(id => {
+  const el = document.getElementById(id);
+  if(el) el.addEventListener('blur', () => syncResearchDesc(id));
+});
+
 // ── Init on load ──
-initCatChips();
+renderCategories();
 
 </script>
 

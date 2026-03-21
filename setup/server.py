@@ -26,7 +26,7 @@ from flask import Flask, jsonify, request, send_from_directory
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from data import ARXIV_CATEGORIES, CATEGORY_HINTS
+from data import ARXIV_CATEGORIES, ARXIV_GROUP_HINTS, ARXIV_GROUPS, CATEGORY_HINTS
 
 try:
     import anthropic as _anthropic_lib
@@ -340,6 +340,21 @@ def _name_match_patterns(full_name: str) -> list[str]:
 @app.route("/")
 def index():
     return send_from_directory(Path(__file__).parent, "index.html")
+
+
+# ─────────────────────────────────────────────────────────────
+#  Routes — Categories
+# ─────────────────────────────────────────────────────────────
+
+
+@app.route("/api/categories")
+def categories():
+    """Return all arXiv category groups, hints, and codes for dynamic UI rendering."""
+    return jsonify({
+        "groups": ARXIV_GROUPS,
+        "hints": ARXIV_GROUP_HINTS,
+        "categories": ARXIV_CATEGORIES,
+    })
 
 
 # ─────────────────────────────────────────────────────────────
