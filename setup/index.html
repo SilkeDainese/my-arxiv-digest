@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>arXiv Digest — UX Lab v4</title>
+<title>arXiv Digest — Setup Wizard</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=IBM+Plex+Sans:wght@300;400;600&family=DM+Mono:wght@400&display=swap');
   :root {
@@ -42,8 +42,8 @@
   .ai-toggle-bar { max-width:660px; margin:12px auto 0; padding:10px 16px; background:white; border:1px solid var(--card-border); border-radius:8px; }
   .ai-toggle-row { display:flex; align-items:center; justify-content:space-between; }
   .ai-key-row { display:none; margin-top:8px; padding-top:8px; border-top:1px solid var(--card-border); }
-  .ai-key-row.show { display:flex; gap:8px; align-items:flex-end; animation:slideIn .2s ease; }
-  .ai-key-row .field { flex:1; }
+  .ai-key-row.show { display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; animation:slideIn .2s ease; }
+  .ai-key-row .field { flex:1; min-width:220px; }
   .ai-key-input { background:var(--ash-white); border:1px solid var(--card-border); border-radius:4px; padding:7px 10px; font-family:'DM Mono',monospace; font-size:12px; width:100%; outline:none; }
   .ai-key-input:focus { border-color:var(--pine); }
   .ai-key-input::placeholder { color:var(--warm-grey); }
@@ -274,8 +274,8 @@
 </header>
 
 <div class="mode-bar">
-  <div class="mode-option active" onclick="setMode(this)">Researcher setup</div>
-  <div class="mode-option" onclick="setMode(this)">Mini setup</div>
+  <div class="mode-option active" onclick="setMode(this)">Researcher setup<small style="display:block;font-size:10px;font-weight:normal;color:inherit;opacity:.7;margin-top:2px;">Full setup — AI scoring, ORCID auto-fill, co-author tracking</small></div>
+  <div class="mode-option" onclick="setMode(this)">Mini setup<small style="display:block;font-size:10px;font-weight:normal;color:inherit;opacity:.7;margin-top:2px;">Quick setup — keywords only, no AI needed</small></div>
 </div>
 
 <!-- ═══════ RESEARCHER FLOW ═══════ -->
@@ -304,7 +304,7 @@
       <div class="note"><a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--pine);">Get a free key &rarr;</a> aistudio.google.com</div>
       <div class="note" style="margin-top:1px;">Free to all with a Google account</div>
     </div>
-    <div style="margin-top:20px;color:var(--warm-grey);font-size:12px;">or</div>
+    <div style="margin-top:20px;color:var(--warm-grey);font-size:12px;flex-shrink:0;text-align:center;">or</div>
     <div class="field" style="flex:1;">
       <label>Anthropic API key (paid)</label>
       <input class="ai-key-input" placeholder="sk-ant-..." id="anthropic-key">
@@ -323,9 +323,10 @@
     <div class="step-body">
       <p>Enter your ORCID to auto-fill your profile, research description, and more. Or skip and fill manually.</p>
 
-      <div style="font-size:12px;color:var(--warm-grey);margin:-4px 0 12px;line-height:1.5;">
-        <strong style="color:var(--ash-black);">ORCID</strong> is your researcher ID — a permanent identifier that links to your publication list. It lets us auto-fill your research description and co-authors. <a href="https://orcid.org" target="_blank" style="color:var(--pine);">orcid.org</a> if you need to register.
-      </div>
+      <details style="font-size:11px;color:var(--warm-grey);margin:-4px 0 12px;">
+        <summary style="cursor:pointer;font-size:11px;">What is ORCID?</summary>
+        <p style="margin:4px 0 0;line-height:1.5;">Your researcher ID — a permanent identifier that links to your publication list. It lets us auto-fill your research description and co-authors. <a href="https://orcid.org" target="_blank" style="color:var(--pine);">orcid.org</a> if you need to register.</p>
+      </details>
 
       <div class="field-row">
         <div class="field" style="flex:3"><label>ORCID ID</label><input class="ai-key-input" id="orcid-input" placeholder="0000-0002-xxxx-xxxx or paste ORCID URL" style="border-radius:6px;width:100%;"></div>
@@ -398,7 +399,7 @@
             <span class="chip chip-ghost" onclick="addArxivNameVariant()">+ add name variant</span>
           </div>
           <div style="display:none;gap:6px;margin-top:8px;align-items:center;" id="arxiv-name-input-row">
-            <input type="text" id="arxiv-name-input" class="ai-key-input" placeholder="e.g. S. Dainese" style="flex:1;border-radius:6px;" autocomplete="off" onkeydown="if(event.key==='Enter'){commitArxivName();event.preventDefault();}if(event.key==='Escape'){hideArxivNameInput();}">
+            <input type="text" id="arxiv-name-input" class="ai-key-input" placeholder="e.g. Dainese, S — the format arXiv uses in author lists" style="flex:1;border-radius:6px;" autocomplete="off" onkeydown="if(event.key==='Enter'){commitArxivName();event.preventDefault();}if(event.key==='Escape'){hideArxivNameInput();}">
             <button class="btn-secondary" style="flex-shrink:0;padding:7px 14px;" onclick="commitArxivName()">Add</button>
             <button class="btn-clear" style="flex-shrink:0;" onclick="hideArxivNameInput()">Cancel</button>
           </div>
@@ -421,14 +422,10 @@
 
       <!-- Research description (the most important field — AI reads this daily) -->
       <div class="section-label">Your research focus</div>
-      <div class="section-desc">The AI reads this daily to score every paper. More specific = better results.</div>
+      <div class="section-desc">The AI reads this daily to score every paper. More specific = better results. Mention your methods, targets, instruments, and what makes a paper relevant to you.</div>
       <div class="field" style="margin-bottom:14px;">
         <div class="mock-textarea" id="research-desc-step2" contenteditable="true" spellcheck="false" style="min-height:70px;" data-placeholder="Describe your research like you'd tell a colleague...">Describe your research like you'd tell a colleague...</div>
       </div>
-      <details style="margin-top:6px;font-size:12px;color:var(--warm-grey);">
-        <summary style="cursor:pointer;">How we use this</summary>
-        <p style="margin:4px 0 0;line-height:1.5;">The AI reads your research focus daily to score every new arXiv paper. More specific = better results. Mention your methods, targets, instruments, and what makes a paper relevant to you.</p>
-      </details>
 
       <!-- Auto-fill button (single action: categories + keywords) -->
       <div id="autofill-bar" style="background:var(--gold-wash);border:1px solid #e8d47a;border-radius:8px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;">
@@ -439,7 +436,7 @@
 
       <!-- arXiv Categories (rendered dynamically from /api/categories) -->
       <div class="section-label">arXiv categories</div>
-      <div class="section-desc">Papers outside these categories are ignored.</div>
+      <div class="section-desc">Which arXiv categories to scan for new papers. Papers by people you follow are always included, even if they publish in a different category.</div>
 
       <div id="cat-container">
         <div style="padding:16px;text-align:center;color:var(--warm-grey);font-size:12px;">Loading categories...</div>
@@ -447,7 +444,7 @@
 
       <!-- Keywords as simple chips -->
       <div class="section-label">Keywords</div>
-      <div class="section-desc">Topics your digest looks for. Each gets a default weight of 7 (main interest).</div>
+      <div class="section-desc">Topics your digest looks for. Matching is fuzzy &mdash; &ldquo;planet&rdquo; also finds &ldquo;planetary&rdquo; and &ldquo;exoplanet.&rdquo; Each keyword gets a default weight of 7 (main interest).</div>
 
       <div id="kw-chips-view">
         <div class="chip-group" id="kw-chips">
@@ -647,7 +644,7 @@
       <hr class="divider" style="margin-top:16px;">
       <div class="download-area">
         <div style="font-family:'DM Serif Display',Georgia,serif;font-size:18px;margin-bottom:4px;">Your config is ready</div>
-        <div style="font-size:12px;color:var(--warm-grey);margin-bottom:4px;">5 categories &middot; 5 keywords &middot; 10 people</div>
+        <div style="font-size:12px;color:var(--warm-grey);margin-bottom:4px;" id="researcher-counts">0 categories &middot; 0 keywords &middot; 0 people</div>
         <div style="font-size:11px;color:var(--warm-grey);margin-bottom:12px;" id="researcher-summary">Highlights &middot; Default card &middot; Mon/Wed/Fri</div>
         <button class="download-btn" onclick="downloadConfig()">Download config.yaml</button>
       </div>
@@ -708,9 +705,9 @@
         <tr style="border-bottom:1px solid var(--card-border);background:var(--gold-wash);">
           <td colspan="3" style="padding:6px 10px;font-size:11px;color:#8a6f00;font-weight:600;">Email delivery &mdash; pick one:</td>
         </tr>
-        <tr style="border-bottom:1px solid var(--card-border);">
+        <tr id="relay-token-row" style="border-bottom:1px solid var(--card-border);">
           <td style="padding:8px 10px;"><code style="background:var(--pine-wash);color:var(--pine);padding:2px 6px;border-radius:3px;font-family:'DM Mono',monospace;font-size:11px;">DIGEST_RELAY_TOKEN</code></td>
-          <td style="padding:8px 10px;color:var(--warm-grey);">From your access code — lets the digest send email without any account setup on your part</td>
+          <td id="relay-token-desc" style="padding:8px 10px;color:var(--warm-grey);">From your access code — lets the digest send email without any account setup on your part</td>
           <td style="text-align:center;padding:8px 10px;font-size:11px;color:var(--warm-grey);">Option A</td>
         </tr>
         <tr id="relay-token-reveal-row" style="display:none;border-bottom:1px solid var(--card-border);background:var(--pine-wash);">
@@ -751,7 +748,7 @@
     <span class="step-num" style="width:22px;height:22px;font-size:11px;">4</span>
     <div>
       <div style="font-size:13px;font-weight:600;">Allow Actions &amp; run workflow</div>
-      <div style="font-size:12px;color:var(--warm-grey);margin-top:2px;">Actions tab &rarr; Enable workflows &rarr; Run workflow.</div>
+      <div style="font-size:12px;color:var(--warm-grey);margin-top:2px;line-height:1.6;">In your fork: go to the <strong>Actions</strong> tab (in the top menu bar). If you see a yellow banner, click "I understand my workflows, go ahead and enable them." Then in the left sidebar, click <strong>arXiv Digest</strong>, then click the grey <strong>Run workflow</strong> button. Your first digest arrives within a few minutes.</div>
       <div style="font-size:12px;color:#888;margin-top:4px;line-height:1.5;">
         <strong style="color:var(--ash-black);">GitHub Actions</strong> runs your digest automatically on a schedule — no server, no cron job, nothing to maintain. It's built into GitHub and runs every time your chosen days roll around.
       </div>
@@ -781,6 +778,7 @@
           <th style="width:24px;"></th>
         </tr></thead>
         <tbody>
+          <tr style="border-bottom:1px solid var(--card-border);background:var(--gold-wash);"><td colspan="4" style="padding:4px 8px;font-size:11px;color:#8a6f00;">These are examples — replace with your own.</td></tr>
           <tr style="border-bottom:1px solid var(--card-border);"><td style="padding:6px 8px;">machine learning</td><td style="text-align:center;"><span class="tag-arrow" style="cursor:pointer;">&#x25B2;</span> <strong>8</strong> <span class="tag-arrow" style="cursor:pointer;">&#x25BC;</span></td><td style="text-align:center;"><input type="checkbox"></td><td><span class="remove" style="cursor:pointer;">&times;</span></td></tr>
           <tr style="border-bottom:1px solid var(--card-border);"><td style="padding:6px 8px;">exoplanets</td><td style="text-align:center;"><span class="tag-arrow" style="cursor:pointer;">&#x25B2;</span> <strong>6</strong> <span class="tag-arrow" style="cursor:pointer;">&#x25BC;</span></td><td style="text-align:center;"><input type="checkbox"></td><td><span class="remove" style="cursor:pointer;">&times;</span></td></tr>
           <tr style="border-bottom:1px solid var(--card-border);background:var(--ash-white);"><td colspan="4" style="padding:6px 8px;"><span class="chip-ghost" style="display:inline-block;">+ add keyword</span></td></tr>
@@ -882,7 +880,7 @@
       <span class="step-num" style="width:22px;height:22px;font-size:11px;">4</span>
       <div>
         <div style="font-size:13px;font-weight:600;">Allow Actions &amp; run workflow</div>
-        <div style="font-size:12px;color:var(--warm-grey);margin-top:2px;">Actions tab &rarr; Enable workflows &rarr; Run workflow.</div>
+        <div style="font-size:12px;color:var(--warm-grey);margin-top:2px;line-height:1.6;">In your fork: go to the <strong>Actions</strong> tab (in the top menu bar). If you see a yellow banner, click "I understand my workflows, go ahead and enable them." Then in the left sidebar, click <strong>arXiv Digest</strong>, then click the grey <strong>Run workflow</strong> button. Your first digest arrives within a few minutes.</div>
         <div style="font-size:12px;color:#888;margin-top:4px;line-height:1.5;"><strong style="color:var(--ash-black);">GitHub Actions</strong> runs your digest automatically on a schedule — no server, no cron job, nothing to maintain. It's built into GitHub.</div>
       </div>
     </div>
@@ -979,6 +977,19 @@ function getAIKeys() {
   return { gemini_key: state.geminiKey, anthropic_key: state.anthropicKey };
 }
 
+function updateRelayTokenRow() {
+  const row = document.getElementById('relay-token-row');
+  const desc = document.getElementById('relay-token-desc');
+  if (!row || !desc) return;
+  if (state.relayToken) {
+    row.style.opacity = '';
+    desc.innerHTML = 'From your access code — lets the digest send email without any account setup on your part';
+  } else {
+    row.style.opacity = '0.45';
+    desc.innerHTML = 'From your access code — lets the digest send email without any account setup on your part<br><span style="font-size:11px;color:#8a6f00;">No access code? Skip this — use Option B (your own email) instead.</span>';
+  }
+}
+
 // ── Access code ──
 function openAccess(){document.getElementById('access-btn').style.display='none';document.getElementById('access-expanded').classList.add('show');document.getElementById('access-input').focus();}
 function closeAccess(){document.getElementById('access-expanded').classList.remove('show');document.getElementById('access-btn').style.display='';document.getElementById('access-status').style.display='none';}
@@ -1014,6 +1025,7 @@ async function submitAccess(){
           tokenInput.value = data.relay_token;
           tokenRow.style.display = '';
         }
+        updateRelayTokenRow();
       }
       s.className = 'access-status approved';
       s.textContent = 'Approved \u2014 got ' + data.unlocked.join(' + ');
@@ -1255,6 +1267,12 @@ async function simulateOrcidV2(){
 
 // ── Auto-fill categories + keywords (real API) ──
 async function autoFillAll(){
+  // Capture key values immediately in case user pasted without blurring
+  const gk = document.getElementById('gemini-key')?.value?.trim();
+  const ak = document.getElementById('anthropic-key')?.value?.trim();
+  if (gk) state.geminiKey = gk;
+  if (ak) state.anthropicKey = ak;
+
   const btn = document.getElementById('autofill-btn');
   const st = document.getElementById('autofill-status');
   btn.textContent = 'Working...'; btn.style.opacity = '.6';
@@ -1513,6 +1531,15 @@ async function downloadConfig(){
     send_hour_utc: 7,
     institution: instFields?.[1]?.textContent?.replace(/ORCID$/, '').trim() || state.orcidData?.institution || document.getElementById('manual-institution')?.textContent?.trim().replace(/^University \/ lab\.\.\.$/, '') || '',
   };
+
+  // Update summary counter to reflect actual choices
+  const countsEl = document.getElementById('researcher-counts');
+  if (countsEl) {
+    const cats = state.selectedCats?.length || 0;
+    const kws = Object.keys(keywords || {}).length;
+    const colls = (state.colleagues || []).length;
+    countsEl.textContent = `${cats} categories \u00b7 ${kws} keywords \u00b7 ${colls} people`;
+  }
 
   const downloadArea = document.querySelector('.download-area');
   try {
@@ -1954,6 +1981,7 @@ function syncResearchDesc(sourceId) {
 
 // ── Init on load ──
 renderCategories();
+updateRelayTokenRow();
 
 </script>
 
