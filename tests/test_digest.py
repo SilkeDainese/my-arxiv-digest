@@ -1554,3 +1554,225 @@ class TestDetectAUResearchers:
         d.detect_au_researchers(papers)
         assert papers[0]["is_au_researcher"] is True
         assert set(papers[0]["au_researcher_authors"]) == {"Smith, J.", "Doe, B."}
+
+
+# ─────────────────────────────────────────────────────────────
+#  _fetch_colleague_papers
+# ─────────────────────────────────────────────────────────────
+
+# Minimal arXiv Atom XML response with one entry, for author-search mocks.
+_ARXIV_AUTHOR_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2501.99999v1</id>
+    <published>{published}</published>
+    <title>A Paper in an Unsubscribed Category</title>
+    <summary>Abstract text about something interesting.</summary>
+    <author><name>Kowalski, A.</name></author>
+    <author><name>Jones, B.</name></author>
+  </entry>
+</feed>
+"""
+
+
+def _make_author_xml(days_ago: int = 1) -> bytes:
+    """Return mock arXiv XML with a paper published `days_ago` days ago."""
+    from datetime import datetime, timedelta, timezone
+    pub = (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    return _ARXIV_AUTHOR_XML.format(published=pub).encode()
+
+
+class TestFetchColleaguePapers:
+    """Tests for _fetch_colleague_papers — targeted author-search fetch."""
+
+    def test_returns_paper_for_colleague_in_unsubscribed_category(self):
+        """Core bug fix: colleague paper in unsubscribed category must be fetched."""
+        config = make_config(
+            categories=["astro-ph.SR"],  # does NOT include astro-ph.IM
+            colleagues={
+                "people": [{"name": "Kowalski", "match": ["Kowalski"]}],
+                "institutions": [],
+            },
+            days_back=3,
+        )
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.read.return_value = _make_author_xml(days_ago=1)
+            mock_response.__enter__ = lambda s: s
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_urlopen.return_value = mock_response
+
+            papers = d._fetch_colleague_papers(config)
+
+        assert len(papers) == 1
+        assert papers[0]["id"] == "2501.99999v1"
+        assert "Kowalski, A." in papers[0]["authors"]
+
+    def test_paper_outside_days_back_is_excluded(self):
+        """Papers older than days_back must be dropped."""
+        config = make_config(
+            colleagues={
+                "people": [{"name": "Kowalski", "match": ["Kowalski"]}],
+                "institutions": [],
+            },
+            days_back=3,
+        )
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.read.return_value = _make_author_xml(days_ago=10)
+            mock_response.__enter__ = lambda s: s
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_urlopen.return_value = mock_response
+
+            papers = d._fetch_colleague_papers(config)
+
+        assert papers == []
+
+    def test_no_colleagues_returns_empty(self):
+        """When there are no colleague entries, return empty list without hitting network."""
+        config = make_config(
+            colleagues={"people": [], "institutions": []},
+        )
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            papers = d._fetch_colleague_papers(config)
+
+        mock_urlopen.assert_not_called()
+        assert papers == []
+
+    def test_network_error_is_silenced(self):
+        """A network failure for one colleague must not raise — just return empty."""
+        import urllib.error
+        config = make_config(
+            colleagues={
+                "people": [{"name": "Kowalski", "match": ["Kowalski"]}],
+                "institutions": [],
+            },
+        )
+        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("timeout")):
+            papers = d._fetch_colleague_papers(config)
+
+        assert papers == []
+
+    def test_returns_correct_paper_dict_fields(self):
+        """Returned paper dicts must include all required fields."""
+        config = make_config(
+            colleagues={
+                "people": [{"name": "Kowalski", "match": ["Kowalski"]}],
+                "institutions": [],
+            },
+            days_back=3,
+        )
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.read.return_value = _make_author_xml(days_ago=1)
+            mock_response.__enter__ = lambda s: s
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_urlopen.return_value = mock_response
+
+            papers = d._fetch_colleague_papers(config)
+
+        required_fields = {
+            "id", "title", "abstract", "authors", "published", "category",
+            "url", "known_authors", "colleague_matches", "colleague_details",
+            "is_own_paper", "matched_keywords", "keyword_hits_raw", "keyword_hits",
+            "feedback_bias",
+        }
+        assert len(papers) == 1
+        for field in required_fields:
+            assert field in papers[0], f"Missing field: {field}"
+
+    def test_colleague_match_flag_is_set(self):
+        """Fetched colleague papers must have the colleague's name in colleague_matches."""
+        config = make_config(
+            colleagues={
+                "people": [{"name": "Kowalski", "match": ["Kowalski"]}],
+                "institutions": [],
+            },
+            days_back=3,
+        )
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.read.return_value = _make_author_xml(days_ago=1)
+            mock_response.__enter__ = lambda s: s
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_urlopen.return_value = mock_response
+
+            papers = d._fetch_colleague_papers(config)
+
+        assert "Kowalski" in papers[0]["colleague_matches"]
+
+    def test_deduplication_against_existing_papers(self):
+        """_fetch_colleague_papers deduplicates against a set of already-seen IDs."""
+        config = make_config(
+            colleagues={
+                "people": [{"name": "Kowalski", "match": ["Kowalski"]}],
+                "institutions": [],
+            },
+            days_back=3,
+        )
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.read.return_value = _make_author_xml(days_ago=1)
+            mock_response.__enter__ = lambda s: s
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_urlopen.return_value = mock_response
+
+            # Pass the ID that will be returned by the mock as already-seen
+            papers = d._fetch_colleague_papers(config, seen_ids={"2501.99999v1"})
+
+        assert papers == []
+
+    def test_multiple_colleagues_each_queried(self):
+        """Each colleague entry triggers a separate arXiv author query."""
+        config = make_config(
+            colleagues={
+                "people": [
+                    {"name": "Kowalski", "match": ["Kowalski"]},
+                    {"name": "Tanaka", "match": ["Tanaka"]},
+                ],
+                "institutions": [],
+            },
+            days_back=3,
+        )
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.read.return_value = _make_author_xml(days_ago=1)
+            mock_response.__enter__ = lambda s: s
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock_urlopen.return_value = mock_response
+
+            papers = d._fetch_colleague_papers(config)
+
+        # Two colleagues → two API calls (one per colleague name)
+        assert mock_urlopen.call_count == 2
+
+
+class TestFetchColleaguePapersIntegration:
+    """Integration: _fetch_colleague_papers results merged into main pipeline output."""
+
+    def test_colleague_papers_merged_and_deduplicated_in_main(self):
+        """Papers from _fetch_colleague_papers must be merged into fetch_arxiv_papers result,
+        deduplicated by ID, and not duplicated if they appeared in a subscribed category."""
+        # Paper that appears in BOTH the category fetch and the author fetch
+        shared_paper = make_paper(id="shared-99", colleague_matches=[], keyword_hits=0.0)
+        # Paper that appears ONLY in the author fetch (the bug case)
+        author_only_paper = make_paper(id="author-only-01", colleague_matches=["Kowalski"], keyword_hits=0.0)
+
+        config = make_config(
+            colleagues={
+                "people": [{"name": "Kowalski", "match": ["Kowalski"]}],
+                "institutions": [],
+            },
+        )
+
+        with patch.object(d, "fetch_arxiv_papers", return_value=[shared_paper]) as mock_fetch:
+            with patch.object(d, "_fetch_colleague_papers", return_value=[shared_paper, author_only_paper]) as mock_colleague:
+                result = d.fetch_all_papers(config)
+
+        # shared_paper must appear only once, author_only_paper must be included
+        ids = [p["id"] for p in result]
+        assert ids.count("shared-99") == 1
+        assert "author-only-01" in ids

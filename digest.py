@@ -755,6 +755,212 @@ def fetch_arxiv_papers(config: dict[str, Any]) -> list[dict[str, Any]]:
     return unique
 
 
+def _fetch_colleague_papers(
+    config: dict[str, Any],
+    seen_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch recent papers for each known colleague via arXiv author search.
+
+    Colleagues may publish in categories the user has not subscribed to.
+    This targeted search ensures their papers are never missed, regardless
+    of which category they appear in.
+
+    Args:
+        config: Application configuration (uses colleagues.people, days_back, keywords).
+        seen_ids: Optional set of arXiv IDs already fetched; results are deduplicated
+                  against this set as well as against each other.
+
+    Returns:
+        List of paper dicts (same schema as fetch_arxiv_papers) for colleague papers
+        not already present in seen_ids.
+    """
+    people = config.get("colleagues", {}).get("people", [])
+    if not people:
+        return []
+
+    already_seen: set[str] = set(seen_ids or [])
+    papers: list[dict[str, Any]] = []
+    ns = {"atom": "http://www.w3.org/2005/Atom"}
+    cutoff = datetime.now(timezone.utc) - timedelta(days=config["days_back"])
+    max_possible = sum(config["keywords"].values()) or 1
+
+    # Build a deduplicated list of search terms from colleague match patterns.
+    # We use the first match pattern for each person as the arXiv au: query term
+    # (typically a last name), deduplicating so the same name isn't queried twice.
+    query_terms: list[tuple[str, list[dict[str, Any]]]] = []
+    seen_terms: set[str] = set()
+    for person in people:
+        match_patterns = person.get("match", [person.get("name", "")])
+        if not match_patterns:
+            continue
+        term = match_patterns[0].strip()
+        if not term or term.lower() in seen_terms:
+            continue
+        seen_terms.add(term.lower())
+        query_terms.append((term, people))
+
+    for i, (term, _) in enumerate(query_terms):
+        if i > 0:
+            time.sleep(3)  # arXiv etiquette: pause between requests
+
+        params = {
+            "search_query": f'au:"{term}"',
+            "start": 0,
+            "max_results": 25,
+            "sortBy": "submittedDate",
+            "sortOrder": "descending",
+        }
+        url = "https://export.arxiv.org/api/query?" + urllib.parse.urlencode(params)
+        print(f"  Fetching colleague papers for author '{term}'...")
+
+        req = urllib.request.Request(url)
+        req.add_header(
+            "User-Agent",
+            "arxiv-digest/1.0 (GitHub Actions; https://github.com/SilkeDainese/arxiv-digest)",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                xml_data = response.read().decode("utf-8")
+        except Exception as e:
+            print(f"  ⚠️  Could not fetch colleague papers for '{term}': {e}")
+            continue
+
+        try:
+            root = ET.fromstring(xml_data)
+        except ET.ParseError as exc:
+            print(f"  ⚠️  Failed to parse arXiv XML for colleague '{term}': {exc}")
+            continue
+
+        for entry in root.findall("atom:entry", ns):
+            try:
+                published_str = entry.find("atom:published", ns).text
+                published = datetime.fromisoformat(published_str.replace("Z", "+00:00"))
+                if published < cutoff:
+                    continue
+
+                arxiv_id = entry.find("atom:id", ns).text.split("/abs/")[-1]
+                if arxiv_id in already_seen:
+                    continue
+
+                title = (entry.find("atom:title", ns).text or "").strip().replace("\n", " ")
+                abstract = (entry.find("atom:summary", ns).text or "").strip().replace("\n", " ")
+                authors = [
+                    a.find("atom:name", ns).text
+                    for a in entry.findall("atom:author", ns)
+                    if a.find("atom:name", ns) is not None
+                    and a.find("atom:name", ns).text
+                ]
+            except (AttributeError, TypeError, ValueError):
+                continue
+
+            # Identify which colleague(s) matched in this paper's author list
+            colleague_flag: list[str] = []
+            colleague_details: list[dict[str, str]] = []
+            for author in authors:
+                for colleague in people:
+                    for pattern in colleague.get("match", []):
+                        if pattern.lower() in author.lower():
+                            colleague_name = colleague.get("name", "Unknown")
+                            if colleague_name not in colleague_flag:
+                                colleague_flag.append(colleague_name)
+                            note = str(colleague.get("note", "")).strip()
+                            if not any(
+                                ex.get("name") == colleague_name
+                                for ex in colleague_details
+                            ):
+                                detail: dict[str, str] = {"name": colleague_name}
+                                if note:
+                                    detail["note"] = note
+                                colleague_details.append(detail)
+                            break
+
+            # Check research_authors and self_match the same way as fetch_arxiv_papers
+            known_flag = []
+            for author in authors:
+                for known in config["research_authors"]:
+                    if known.lower() in author.lower():
+                        known_flag.append(author)
+                        break
+
+            is_own_paper = False
+            for pattern in config.get("self_match", []):
+                for author in authors:
+                    if pattern.lower() in author.lower():
+                        is_own_paper = True
+                        break
+                if is_own_paper:
+                    break
+
+            matched_keywords = _matched_keywords_for_text(title + " " + abstract, config)
+            kw_hits_raw = sum(config["keywords"][kw] for kw in matched_keywords)
+            kw_hits = round(100 * kw_hits_raw / max_possible, 1)
+
+            # Use "colleague-fetch" as category sentinel so downstream rendering
+            # can display the real category if the XML includes it, or fall back cleanly.
+            category_el = entry.find("{http://arxiv.org/schemas/atom}primary_category")
+            category = (
+                category_el.get("term", "unknown")
+                if category_el is not None
+                else "unknown"
+            )
+
+            already_seen.add(arxiv_id)
+            papers.append({
+                "id": arxiv_id,
+                "title": title,
+                "abstract": abstract,
+                "authors": authors,
+                "author_affiliations": {},
+                "published": published.strftime("%Y-%m-%d"),
+                "category": category,
+                "url": f"https://arxiv.org/abs/{arxiv_id}",
+                "known_authors": known_flag,
+                "colleague_matches": colleague_flag,
+                "colleague_details": colleague_details,
+                "is_own_paper": is_own_paper,
+                "matched_keywords": matched_keywords,
+                "keyword_hits_raw": kw_hits_raw,
+                "keyword_hits": kw_hits,
+                "feedback_bias": 0,
+            })
+
+    if papers:
+        print(f"  Found {len(papers)} additional colleague paper(s) outside subscribed categories")
+    return papers
+
+
+def fetch_all_papers(config: dict[str, Any]) -> list[dict[str, Any]]:
+    """Fetch papers from subscribed categories AND targeted colleague author searches.
+
+    This is the main fetch entry point for the pipeline. It combines:
+    1. Category-based fetch (fetch_arxiv_papers) — the normal subscription feed.
+    2. Author-targeted fetch (_fetch_colleague_papers) — ensures colleague papers
+       in unsubscribed categories are never missed.
+
+    Results are deduplicated by arXiv ID.
+
+    Args:
+        config: Application configuration.
+
+    Returns:
+        Deduplicated list of all paper dicts, with keyword scores normalised to 0-100.
+    """
+    papers = fetch_arxiv_papers(config)
+    seen_ids = {p["id"] for p in papers}
+    colleague_extras = _fetch_colleague_papers(config, seen_ids=seen_ids)
+    # Deduplicate the merged list — _fetch_colleague_papers already respects seen_ids,
+    # but a defensive pass here guards against callers (e.g. in tests) that mock
+    # _fetch_colleague_papers and return already-seen IDs.
+    merged: list[dict[str, Any]] = []
+    final_seen: set[str] = set()
+    for p in papers + colleague_extras:
+        if p["id"] not in final_seen:
+            final_seen.add(p["id"])
+            merged.append(p)
+    return merged
+
+
 def pre_filter(papers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Keep papers that match keywords or have known authors."""
     filtered = [p for p in papers if p["keyword_hits"] > 0 or p["known_authors"] or p.get("feedback_bias", 0) > 0]
@@ -2048,7 +2254,7 @@ def main() -> None:
 
     print("\n📡 Fetching papers from arXiv...")
     try:
-        papers = fetch_arxiv_papers(config)
+        papers = fetch_all_papers(config)
     except urllib.error.URLError as exc:
         print(f"\n❌ arXiv fetch failed (network error): {exc}")
         print("   Check your internet connection, or try again — arXiv may be temporarily down.")
