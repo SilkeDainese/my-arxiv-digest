@@ -26,11 +26,14 @@ jobs:
 
       - name: Send Sunday preview
         env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DIGEST_RELAY_TOKEN: ${{ secrets.DIGEST_RELAY_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           STUDENT_ADMIN_TOKEN: ${{ secrets.STUDENT_ADMIN_TOKEN }}
           STUDENT_TOKEN_SECRET: ${{ secrets.STUDENT_TOKEN_SECRET }}
+          STUDENT_MANAGE_URL: ${{ vars.STUDENT_MANAGE_URL }}
+          STUDENT_REGISTRY_URL: ${{ vars.STUDENT_REGISTRY_URL }}
         run: python student_digest.py --send-preview
