@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import copy
+import hashlib
+import hmac
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -20,6 +24,7 @@ from digest import (
     analyse_papers,
     apply_feedback_bias,
     detect_au_researchers,
+    detect_delights,
     fetch_arxiv_papers,
     ingest_feedback_from_github,
     pre_filter,
@@ -41,10 +46,29 @@ STUDENT_REGISTRY_URL = os.environ.get(
     "https://arxiv-digest-relay.vercel.app/api/students",
 ).strip()
 STUDENT_MANAGE_URL = os.environ.get("STUDENT_MANAGE_URL", STUDENT_REGISTRY_URL).strip()
+STUDENT_TOKEN_SECRET = os.environ.get("STUDENT_TOKEN_SECRET", "").strip()
 FEEDBACK_RELAY_URL = os.environ.get(
     "FEEDBACK_RELAY_URL",
     "https://arxiv-digest-relay.vercel.app/api/feedback",
 ).strip()
+
+_SETTINGS_TOKEN_TTL = 7 * 86400  # 7 days
+
+
+def _generate_settings_token(email: str, secret: str) -> str:
+    """Create an HMAC-signed settings token (mirrors relay/_registry.py logic)."""
+    data = {
+        "email": email,
+        "action": "change_settings",
+        "payload": {},
+        "expires_at": time.time() + _SETTINGS_TOKEN_TTL,
+        "nonce": os.urandom(8).hex(),
+    }
+    data_bytes = json.dumps(data, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    data_b64 = base64.urlsafe_b64encode(data_bytes).decode("ascii")
+    sig = hmac.new(secret.encode("utf-8"), data_bytes, hashlib.sha256).digest()
+    sig_b64 = base64.urlsafe_b64encode(sig).decode("ascii")
+    return f"{data_b64}.{sig_b64}"
 
 
 def build_student_base_config() -> dict[str, Any]:
@@ -87,6 +111,30 @@ def fetch_student_subscriptions() -> list[dict[str, Any]]:
         except (TypeError, ValueError) as exc:
             print(f"   ↷ Skipping invalid student subscription record: {exc}")
     return subscriptions
+
+
+def _mark_welcome_sent(email: str) -> None:
+    """Tell the relay to set welcome_sent=True for this student (best-effort)."""
+    admin_token = os.environ.get("STUDENT_ADMIN_TOKEN", "").strip()
+    if not admin_token:
+        return
+    payload = json.dumps({
+        "action": "mark_welcome_sent",
+        "admin_token": admin_token,
+        "email": email,
+    }).encode("utf-8")
+    try:
+        request = urllib.request.Request(
+            STUDENT_REGISTRY_URL,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:
+            response.read()
+        print(f"   ✓ Marked welcome_sent for {email}")
+    except Exception as exc:
+        print(f"   ⚠️  Could not mark welcome_sent for {email}: {exc}")
 
 
 def fetch_aggregate_feedback() -> dict[str, dict[str, Any]]:
@@ -232,20 +280,28 @@ def make_student_digest_config(base_config: dict[str, Any], subscription: dict[s
     email = subscription["email"]
     config["recipient_email"] = email
     config["max_papers"] = int(subscription["max_papers_per_week"])
-    # Email only — no packages or max_papers in the URL. Pre-filling from a
-    # weekly email embeds stale data: a student who updates mid-week and then
-    # clicks an older link would silently overwrite their current subscription.
-    # The manage page's "Load current settings" button is the correct path.
-    manage_params = {"email": email}
-    config["subscription_manage_url"] = (
-        f"{STUDENT_MANAGE_URL}?{urllib.parse.urlencode(manage_params)}"
-    )
-    unsub_params = {**manage_params, "mode": "unsubscribe"}
+    # Token-authenticated settings URL — proves identity from the inbox.
+    # Falls back to plain email URL if STUDENT_TOKEN_SECRET is not set.
+    if STUDENT_TOKEN_SECRET:
+        settings_token = _generate_settings_token(email, STUDENT_TOKEN_SECRET)
+        settings_params = {"action": "settings", "token": settings_token}
+        config["subscription_manage_url"] = (
+            f"{STUDENT_MANAGE_URL}?{urllib.parse.urlencode(settings_params)}"
+        )
+    else:
+        manage_params = {"email": email}
+        config["subscription_manage_url"] = (
+            f"{STUDENT_MANAGE_URL}?{urllib.parse.urlencode(manage_params)}"
+        )
+    unsub_params = {"email": email, "mode": "unsubscribe"}
     config["subscription_unsubscribe_url"] = (
         f"{STUDENT_MANAGE_URL}?{urllib.parse.urlencode(unsub_params)}"
     )
     labels = [package_labels()[package_id] for package_id in subscription["package_ids"]]
-    config["tagline"] = "Selected packages: " + ", ".join(labels)
+    config["tagline"] = "Your categories: " + ", ".join(labels)
+    # First digest gets a welcome header; subsequent ones do not
+    if not subscription.get("welcome_sent", True):
+        config["show_welcome"] = True
     return config
 
 
@@ -258,7 +314,9 @@ def _preview_filename(email: str) -> str:
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line parser for student batch runs."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--preview", action="store_true", help="Render previews instead of sending email.")
+    preview_group = parser.add_mutually_exclusive_group()
+    preview_group.add_argument("--preview", action="store_true", help="Render previews instead of sending email.")
+    preview_group.add_argument("--send-preview", action="store_true", help="Send one preview digest to RECIPIENT_EMAIL.")
     parser.add_argument("--preview-dir", default="", help="Directory for HTML previews when using --preview.")
     parser.add_argument("--recipient", default="", help="Only process one student email.")
     parser.add_argument("--limit", type=int, default=0, help="Process only the first N active students.")
@@ -336,8 +394,53 @@ def main(argv: list[str] | None = None) -> int:
     ranked_papers, scoring_method = analyse_papers(candidates, base_config)
     annotate_student_packages(ranked_papers)
     detect_au_researchers(ranked_papers)
+    detect_delights(ranked_papers)
     apply_aggregate_expert_signal(ranked_papers, aggregated)
     print(f"   {len(ranked_papers)} papers available for student selection ({scoring_method})")
+
+    # ─────── Send-preview: one email to RECIPIENT_EMAIL ──────
+    if args.send_preview:
+        recipient_email = os.environ.get("RECIPIENT_EMAIL", "").strip()
+        if not recipient_email:
+            print("\n❌ --send-preview requires RECIPIENT_EMAIL env var.")
+            return 1
+
+        # Try to find Silke's own subscription for realistic rendering
+        preview_sub = None
+        for sub in active_subscriptions:
+            if normalise_email(sub.get("email", "")) == normalise_email(recipient_email):
+                preview_sub = sub
+                break
+        if preview_sub is None:
+            # Fall back to a default config covering all categories
+            preview_sub = {
+                "email": recipient_email,
+                "package_ids": list(AVAILABLE_STUDENT_PACKAGES),
+                "max_papers_per_week": 20,
+            }
+
+        selected = select_student_papers(
+            ranked_papers,
+            list(preview_sub["package_ids"]),
+            int(preview_sub["max_papers_per_week"]),
+        )
+        if not selected:
+            print("\n⚠️  No matching papers for preview — nothing to send.")
+            return 0
+
+        preview_config = make_student_digest_config(base_config, preview_sub)
+        preview_config["recipient_email"] = recipient_email
+        html = render_html(
+            selected, [], preview_config, date_str,
+            own_papers=[], scoring_method=scoring_method,
+        )
+        print(f"\n📧 Sending preview digest ({len(selected)} papers) to {recipient_email}")
+        if send_email(html, len(selected), date_str, preview_config,
+                      papers=selected, subject_prefix="[PREVIEW] "):
+            print("✨ Preview sent.\n")
+            return 0
+        print("❌ Preview send failed.\n")
+        return 1
 
     processed_count = 0
     skipped_count = 0
@@ -376,6 +479,9 @@ def main(argv: list[str] | None = None) -> int:
                 if not send_email(html, len(selected), date_str, student_config, papers=selected):
                     failed_recipients.append(subscription["email"])
                     continue
+                # Mark welcome as sent after first successful delivery
+                if student_config.get("show_welcome"):
+                    _mark_welcome_sent(subscription["email"])
             processed_count += 1
         except Exception as exc:
             print(f"   ❌ Unexpected error for {subscription['email']}: {exc}")
