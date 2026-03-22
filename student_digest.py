@@ -90,13 +90,22 @@ def rewrite_summaries_for_students(
             "summary": p.get("plain_summary", ""),
         })
 
-    prompt = f"""Rewrite these astronomy paper summaries for 2nd-year university physics students.
+    prompt = f"""Rewrite these astronomy paper summaries for 4th-semester university physics students taking an astronomy elective at Aarhus University.
 
-What they know (completed courses):
-- Stars & Planets: stellar evolution, HR diagrams, exoplanet detection (transits, radial velocity), photometry, spectroscopy basics, binary stars
-- Galaxies & Cosmology (taking now): Milky Way structure, dark matter, black holes in galaxy centers, elliptical/spiral galaxies, Tully-Fisher, galaxy clusters, gravitational lensing, Friedmann equation, expanding universe, cosmological parameters, CMB, Big Bang nucleosynthesis
+Their physics background (they CAN handle real physics):
+- Classical mechanics + advanced mechanics (Lagrangian, Hamiltonian)
+- Electrodynamics, optics, special relativity
+- Quantum mechanics + atomic physics
+- Statistical physics, thermodynamics
+- Linear algebra, calculus, differential equations
+- Python programming and statistical data analysis
+- Experimental lab methods
 
-What they do NOT know: advanced particle physics, quantum field theory, magnetohydrodynamics, numerical methods, statistical mechanics, instrument-specific jargon (pipeline, reduction), most acronyms beyond JWST/HST/ESO
+Their astronomy background (completed + current courses):
+- Stars & Planets (completed): stellar evolution, HR diagrams, exoplanet detection (transits, radial velocity), photometry, spectroscopy basics, binary stars, stellar structure, nucleosynthesis in stars
+- Galaxies & Cosmology (taking now): Milky Way structure, dark matter, supermassive black holes, elliptical/spiral galaxies, Tully-Fisher, galaxy clusters, gravitational lensing, Friedmann equation, expanding universe, cosmological parameters, CMB, Big Bang nucleosynthesis
+
+What they do NOT know (avoid or explain): specialized subfields (superradiance, axions, magnetohydrodynamics), instrument-specific jargon (pipeline, reduction, calibration frames), paper-specific acronyms and survey names, advanced numerical methods, radiative transfer details
 
 Rules:
 - One sentence each, max 25 words
