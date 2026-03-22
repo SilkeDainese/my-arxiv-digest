@@ -43,6 +43,7 @@ class _FakeHandler:
     """Minimal stand-in for BaseHTTPRequestHandler used in relay tests."""
     def __init__(self):
         self.response = None
+        self.path = "/api/students"
 
     def _respond(self, status, body):
         self.response = (status, body)

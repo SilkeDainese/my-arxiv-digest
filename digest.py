@@ -1299,8 +1299,9 @@ def analyse_papers(papers: list[dict[str, Any]], config: dict[str, Any]) -> tupl
 from brand import (PINE, GOLD, UMBER, ASH_WHITE, ASH_BLACK,
                    CARD_BORDER, WARM_GREY, PINE_WASH, PINE_LIGHT, GOLD_LIGHT,
                    GOLD_WASH, ALERT_RED, ALERT_RED_WASH, CATALOG_PURPLE, CATALOG_WASH,
+                   CREAM, WARM_WHITE, FOOTER_BG, SOFT_GREY, TERRACOTTA, GREEN_HAND,
                    FONT_HEADING, FONT_BODY, FONT_MONO)
-from setup.data import AU_STUDENT_TRACK_LABELS
+from setup.data import AU_STUDENT_TRACK_LABELS, DELIGHT_KEYWORDS
 
 
 # ── Shared inline-style constants ──
@@ -1517,118 +1518,130 @@ def detect_au_researchers(papers: list[dict[str, Any]]) -> None:
         paper["au_researcher_authors"] = au_authors
 
 
+def detect_delights(papers: list[dict[str, Any]]) -> None:
+    """Add cultural wayfinding notes to papers for student digest.
+
+    Enriches each paper with a 'delights' list of short notes
+    for Kalam-font rendering. Max 2 per paper, sometimes none.
+    """
+    for paper in papers:
+        delights: list[str] = []
+
+        # AU affiliation delights (highest priority)
+        if paper.get("is_au_researcher"):
+            au_authors = paper.get("au_researcher_authors", [])
+            author_affs = paper.get("author_affiliations", {})
+            au_delight = None
+            for name in au_authors:
+                for aff in author_affs.get(name, []):
+                    aff_lower = aff.lower()
+                    if "phd" in aff_lower or "student" in aff_lower:
+                        au_delight = "AU PhD student"
+                        break
+                    elif "postdoc" in aff_lower:
+                        au_delight = "AU postdoc"
+                        break
+                if au_delight:
+                    break
+            if au_delight is None and au_authors:
+                au_delight = "AU researcher"
+            if au_delight:
+                delights.append(au_delight)
+
+        # Keyword-based delights from abstract + title
+        text = (paper.get("title", "") + " " + paper.get("abstract", "")).lower()
+        seen_notes: set[str] = set(delights)
+        for keyword, note in DELIGHT_KEYWORDS.items():
+            if note in seen_notes:
+                continue
+            if keyword.lower() in text:
+                delights.append(note)
+                seen_notes.add(note)
+            if len(delights) >= 2:
+                break
+
+        paper["delights"] = delights
+
+
 def _render_student_paper_card(p: dict[str, Any]) -> str:
-    """Return a student-mode paper card: score badge, AU badge, compact metadata, abstract toggle."""
+    """Return a student-mode paper entry: 4-line format separated by bottom border."""
     category = p.get("category", "")
     authors_display = ", ".join(p.get("authors", [])[:4])
     if len(p.get("authors", [])) > 4:
         authors_display += f" +{len(p['authors']) - 4}"
 
-    # Package badge — show the first matched student package as a friendly label
+    # Line 1: Category label + arXiv code (text only, no pills)
     pkg_ids = p.get("student_package_ids", [])
     pkg_label = AU_STUDENT_TRACK_LABELS.get(pkg_ids[0], "") if pkg_ids else ""
-    pkg_badge = (
-        f'<span style="display:inline-block;background:{PINE};color:white;font-family:\'IBM Plex Mono\',monospace;'
-        f'font-size:11px;font-weight:600;padding:3px 8px;border-radius:4px;margin-right:6px">'
-        f'{_esc(pkg_label)}</span>'
-    ) if pkg_label else ""
+    category_line = ""
+    if pkg_label or category:
+        label_part = f'<span style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;color:#999">{_esc(pkg_label)}</span>' if pkg_label else ""
+        code_part = f'<span style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;color:#CCC;margin-left:6px">{_esc(category)}</span>' if category else ""
+        category_line = f'<div style="margin-bottom:4px">{label_part}{code_part}</div>'
 
-    # AU RESEARCHER badge (conditional)
-    au_badge = ""
-    au_bio = ""
-    if p.get("is_au_researcher"):
-        au_badge = (
-            f'<span style="display:inline-block;background:{GOLD};color:{ASH_BLACK};font-family:\'DM Mono\',monospace;'
-            f'font-size:9px;letter-spacing:0.15em;text-transform:uppercase;padding:3px 8px;border-radius:4px;'
-            f'margin-left:4px">AU RESEARCHER</span>'
-        )
-        au_authors = p.get("au_researcher_authors", [])
-        au_affs = p.get("author_affiliations", {})
-        au_lines = []
-        for name in au_authors:
-            affs = au_affs.get(name, [])
-            aff_text = ", ".join(affs[:2]) if affs else "Aarhus University"
-            au_lines.append(f"{_esc(name)} — {_esc(aff_text)}")
-        if au_lines:
-            au_bio = (
-                f'<div style="background:{GOLD_WASH};border:1px solid {GOLD_LIGHT};border-radius:5px;'
-                f'padding:8px 12px;margin:8px 0;font-family:\'IBM Plex Sans\',sans-serif;font-size:12px;'
-                f'color:{UMBER};line-height:1.5">'
-                + "<br>".join(au_lines)
-                + "</div>"
-            )
-
-    # Compact metadata line
-    arxiv_id = p.get("id", "")
-    pub_date = p.get("published", "")
-    meta_parts = [_esc(authors_display)]
-    if arxiv_id:
-        meta_parts.append(f"arXiv:{_esc(arxiv_id)}")
-    if category:
-        meta_parts.append(_esc(category))
-    if pub_date:
-        meta_parts.append(_esc(pub_date))
-    meta_line = " &middot; ".join(meta_parts)
-
-    # Summary (plain text finding)
-    summary = _esc(_one_sentence(p.get("plain_summary", "")))
-
-    # Keyword tags
-    matched_kw = p.get("matched_keywords", [])
-    tags_html = " ".join(
-        f'<span style="display:inline-block;font-family:\'DM Mono\',monospace;font-size:9px;'
-        f'background:{PINE_WASH};color:{PINE};padding:2px 6px;border-radius:3px;margin:2px 2px 0 0">'
-        f'{_esc(kw)}</span>'
-        for kw in matched_kw[:6]
+    # Line 2: Title (DM Serif Display, linked)
+    title_html = (
+        f'<div style="font-family:{FONT_HEADING};font-size:19px;color:#2D2D2D;line-height:1.35;margin-bottom:4px">'
+        f'<a href="{_esc(p.get("url", ""))}" style="color:inherit;text-decoration:none">{_esc(_short_title(p.get("title", "")))}</a>'
+        f'</div>'
     )
 
-    # Pre-build summary HTML to avoid backslash-in-fstring issue (Python 3.9)
+    # Line 3: Summary (one sentence)
+    summary = _esc(_one_sentence(p.get("plain_summary", "")))
     summary_html = ""
     if summary:
-        body_font = "'IBM Plex Sans',sans-serif"
         summary_html = (
-            f'<div style="font-family:{body_font};font-size:12px;color:{ASH_BLACK};'
-            f'line-height:1.5;margin-bottom:8px">{summary}</div>'
+            f'<div style="font-family:{FONT_BODY};font-size:14px;color:#555;'
+            f'line-height:1.5;margin-bottom:6px">{summary}</div>'
         )
 
-    # "Read on arXiv" link (replaces <details> which doesn't work in email clients)
-    arxiv_link = ""
+    # Line 4: Bottom meta (authors, date, status, arXiv link)
+    pub_date = p.get("published", "")
+    meta_parts = [_esc(authors_display)]
+    if pub_date:
+        meta_parts.append(_esc(pub_date))
+    status = p.get("status", "")
+    if status:
+        meta_parts.append(_esc(status))
     paper_url = p.get("url", "")
     if paper_url:
-        arxiv_link = (
-            f'<a href="{_esc(paper_url)}" style="font-family:\'DM Mono\',monospace;font-size:11px;'
-            f'color:{PINE};text-decoration:none">Read on arXiv &#8594;</a>'
+        meta_parts.append(
+            f'<a href="{_esc(paper_url)}" style="color:#999;text-decoration:underline;text-underline-offset:2px">Read on arXiv &#8594;</a>'
+        )
+    meta_line = f'<div style="font-family:{FONT_BODY};font-size:12px;color:#999;line-height:1.5">{" &middot; ".join(meta_parts)}</div>'
+
+    # Cultural wayfinding: delight notes (Kalam handscribble)
+    delight_html = ""
+    for delight in p.get("delights", []):
+        delight_html += (
+            f'<p style="font-family:\'Kalam\',cursive;font-size:14px;color:{GREEN_HAND};'
+            f'margin:4px 0 0">&#8627; {_esc(delight)}</p>'
         )
 
     return f"""
-    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:10px">
-        <tr><td style="background:white;border:1px solid {CARD_BORDER};border-radius:8px;padding:14px 16px 12px">
-            <div style="margin-bottom:6px">{pkg_badge}{au_badge}</div>
-            <div style="font-family:'IBM Plex Sans',sans-serif;font-size:15px;font-weight:600;color:{ASH_BLACK};line-height:1.35;margin-bottom:4px">
-                <a href="{p.get('url', '')}" style="color:{ASH_BLACK};text-decoration:none">{_esc(_short_title(p.get('title', '')))}</a>
-            </div>
-            <div style="font-family:'DM Mono',monospace;font-size:10px;color:{WARM_GREY};margin-bottom:8px">{meta_line}</div>
-            {au_bio}
-            {summary_html}
-            <div>{arxiv_link} {tags_html}</div>
-        </td></tr>
-    </table>"""
+    <div style="padding:14px 0;border-bottom:1px solid #E0DDD6">
+        {category_line}
+        {title_html}
+        {summary_html}
+        {meta_line}
+        {delight_html}
+    </div>"""
 
 
 def _render_student_header(papers: list[dict[str, Any]], date_str: str) -> str:
     """Return the student digest email header with pine bar."""
     return f"""
-  <tr><td style="background:{PINE};padding:20px 28px">
+  <tr><td style="background:{PINE};padding:14px 28px">
     <table width="100%" cellpadding="0" cellspacing="0" border="0">
       <tr>
-        <td style="font-family:'DM Serif Display',Georgia,serif;font-size:20px;color:white">AU student digest</td>
-        <td style="text-align:right;font-family:'DM Mono',monospace;font-size:11px;color:rgba(255,255,255,0.7)">{date_str}</td>
+        <td style="font-family:{FONT_HEADING};font-size:18px;color:{WARM_WHITE}">AU student digest</td>
+        <td style="text-align:right;font-family:{FONT_MONO};font-size:11px;color:rgba(255,253,248,0.7)">{date_str}</td>
       </tr>
     </table>
   </td></tr>
   <tr><td style="padding:24px 28px 16px">
-    <div style="font-family:'DM Serif Display',Georgia,serif;font-size:24px;color:{ASH_BLACK};margin-bottom:4px">Your papers this week</div>
-    <div style="font-family:'DM Mono',monospace;font-size:12px;color:{WARM_GREY}">{len(papers)} paper{"s" if len(papers) != 1 else ""} selected for you</div>
+    <div style="font-family:{FONT_HEADING};font-size:24px;color:{ASH_BLACK};margin-bottom:4px">Your papers this week</div>
+    <div style="font-family:{FONT_MONO};font-size:12px;color:{WARM_GREY}">{len(papers)} paper{"s" if len(papers) != 1 else ""} selected for you</div>
   </td></tr>"""
 
 
@@ -1817,6 +1830,48 @@ def _render_report_link(github_repo: str) -> str:
     </div>"""
 
 
+def _render_student_footer(config: dict[str, Any], scoring_method: str) -> str:
+    """Return the student-specific email footer with personal attribution."""
+    subscription_manage_url = str(config.get("subscription_manage_url", "")).strip()
+    subscription_unsubscribe_url = str(config.get("subscription_unsubscribe_url", "")).strip()
+    link_style = f"color:{PINE};text-decoration:none"
+
+    service_links: list[str] = []
+    if subscription_manage_url:
+        service_links.append(f'<a href="{subscription_manage_url}" style="{link_style}">&#x2699;&#xFE0F; Change settings</a>')
+        service_links.append(f'<a href="{subscription_manage_url}" style="{link_style}">&#x1F4DD; Change categories</a>')
+    if subscription_unsubscribe_url:
+        service_links.append(f'<a href="{subscription_unsubscribe_url}" style="color:{SOFT_GREY};text-decoration:none">Unsubscribe</a>')
+
+    self_service_html = f"""
+    <div style="font-family:'DM Mono',monospace;font-size:10px;color:{WARM_GREY};letter-spacing:0.08em;margin-bottom:14px;text-align:center">
+      {' &middot; '.join(service_links)}
+    </div>""" if service_links else ""
+
+    scoring_labels = {
+        "claude": "Claude (Anthropic)",
+        "gemini": "Gemini 2.0 Flash (Google)",
+        "keywords": "keyword matching",
+        "keywords_fallback": "keyword matching (AI unavailable)",
+        "gemini_rate_limited": "keyword matching (Gemini free-tier limit)",
+        "none": "AI",
+    }
+    scoring_label = scoring_labels.get(scoring_method, "AI")
+
+    return f"""
+  <!-- FOOTER -->
+  <tr><td style="padding:36px 44px;border-top:1px solid {CARD_BORDER};background:{FOOTER_BG}">
+    <div style="text-align:center;font-size:18px;margin-bottom:18px;opacity:0.5;letter-spacing:10px;color:{WARM_GREY}">&#x2726; &middot; &#x2726; &middot; &#x2726;</div>
+    {self_service_html}
+    <div style="font-family:'DM Mono',monospace;font-size:9.5px;color:{WARM_GREY};letter-spacing:0.1em;line-height:2.2;text-align:center">
+      Made by <a href="https://silkedainese.github.io" style="color:{WARM_GREY};text-decoration:none">Silke Dainese</a> &middot;
+      <a href="mailto:dainese@phys.au.dk" style="color:{WARM_GREY};text-decoration:none">dainese@phys.au.dk</a><br>
+      Summaries are AI-generated and may contain errors.<br>
+      This digest is a personal project by Silke Dainese and is not affiliated with Aarhus University.
+    </div>
+  </td></tr>"""
+
+
 def _render_footer(config: dict[str, Any], scoring_method: str) -> str:
     """Return the email footer HTML including self-service links and credits."""
     digest_name = config.get("digest_name", "arXiv Digest")
@@ -1852,7 +1907,7 @@ def _render_footer(config: dict[str, Any], scoring_method: str) -> str:
         service_links.append(f'<a href="{delete_url}" style="{link_style}">&#x1F5D1;&#xFE0F; Unsubscribe &amp; delete</a>')
     elif subscription_manage_url:
         service_links.append(f'<a href="{subscription_manage_url}" style="{link_style}">&#x2699;&#xFE0F; Change settings</a>')
-        service_links.append(f'<a href="{subscription_manage_url}" style="{link_style}">&#x1F4DD; Change packages</a>')
+        service_links.append(f'<a href="{subscription_manage_url}" style="{link_style}">&#x1F4DD; Change categories</a>')
         service_links.append(f'<a href="{subscription_manage_url}" style="{link_style}">&#x1F4CB; Manage subscription</a>')
         if subscription_unsubscribe_url:
             service_links.append(f'<a href="{subscription_unsubscribe_url}" style="{link_style}">&#x1F5D1;&#xFE0F; Unsubscribe</a>')
@@ -1948,18 +2003,35 @@ def render_html(papers: list[dict[str, Any]], colleague_papers: list[dict[str, A
 
     # ── Student mode uses simpler layout ──
     if student_mode:
+        welcome_html = ""
+        if config.get("show_welcome"):
+            welcome_html = """
+  <tr><td>
+    <div style="padding:24px 28px;background:#F5F3EF;border-bottom:1px solid #E0DDD6">
+      <p style="font-family:'DM Serif Display',serif;font-size:22px;color:#2D2D2D;margin:0 0 8px">
+        Welcome to the AU student digest
+      </p>
+      <p style="font-family:'IBM Plex Sans',sans-serif;font-size:14px;color:#555;line-height:22px;margin:0">
+        Each week, you'll get papers from your selected categories.
+        Scan the titles &mdash; that's all most researchers do too.
+        You can change your categories or unsubscribe anytime from the footer.
+      </p>
+    </div>
+  </td></tr>
+"""
         return (
             _render_css(digest_name, researcher_name, date_str)
             + "\n"
             + _render_student_header(papers, date_str)
             + "\n"
+            + welcome_html
             + f"""
   <!-- PAPER CARDS -->
   <tr><td style="padding:0 24px 24px">
     {cards_html}
   </td></tr>
 """
-            + _render_footer(config, scoring_method)
+            + _render_student_footer(config, scoring_method)
             + """
 
 </table>
@@ -2152,7 +2224,8 @@ def _send_via_smtp(recipients: list[str], subject: str, html: str,
 
 
 def send_email(html: str, paper_count: int, date_str: str, config: dict[str, Any],
-               papers: list[dict[str, Any]] | None = None) -> bool:
+               papers: list[dict[str, Any]] | None = None,
+               subject_prefix: str = "") -> bool:
     """Send the digest email via relay (default) or direct SMTP.
 
     Uses the shared relay service unless SMTP_USER and SMTP_PASSWORD are set
@@ -2165,7 +2238,7 @@ def send_email(html: str, paper_count: int, date_str: str, config: dict[str, Any
 
     digest_name = config["digest_name"]
     paper_word = "paper" if paper_count == 1 else "papers"
-    subject = f"🔭 {digest_name} — {paper_count} {paper_word} · {date_str}"
+    subject = f"{subject_prefix}🔭 {digest_name} — {paper_count} {paper_word} · {date_str}"
     plain_text = _build_plain_text(date_str, paper_count, papers)
 
     # If SMTP credentials are set, send directly (self-hosted mode)
