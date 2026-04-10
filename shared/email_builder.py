@@ -12,6 +12,8 @@ from __future__ import annotations
 import html as html_mod
 from typing import Any, Optional
 
+from shared.ai_scorer import _strip_latex
+
 # ─────── Brand palette ────────────────────────────────────────────────────
 # Kept in sync with ~/Projects/arxiv-digest/brand.py
 PINE = "#2F4F3E"
@@ -57,10 +59,15 @@ def _paper_html(paper: dict[Any, Any]) -> str:
 
 
 def _short_title(title: str, max_len: int = 100) -> str:
-    """Truncate a title to max_len characters, preserving word boundaries."""
-    if len(title) <= max_len:
-        return title
-    truncated = title[:max_len]
+    """Strip LaTeX and truncate a title to max_len characters, preserving word boundaries.
+
+    LaTeX stripping must happen before truncation so that titles like
+    '$\\alpha$-elements in nearby stars' don't show raw '$\\alpha$' in emails.
+    """
+    t = _strip_latex(" ".join((title or "").split()))
+    if len(t) <= max_len:
+        return t
+    truncated = t[:max_len]
     last_space = truncated.rfind(" ")
     if last_space > max_len * 0.6:
         truncated = truncated[:last_space]

@@ -216,3 +216,77 @@ class TestSendDigestQualityGate:
         assert status == 200
         # send_message should have been called (for the student)
         assert mock_send.called
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fix 3: quality gate must also catch low ai_score and zero subscriber_score
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestScoreFloorQualityGate:
+    """Fix 3: papers with ai_score < 3.0 (AI-scored) or subscriber_score == 0
+    (keyword-only) must be rejected by the quality gate before send."""
+
+    def make_low_ai_score_paper(self, score: float = 2.0) -> dict:
+        return {
+            "id": "2501.00099",
+            "title": "Barely relevant paper",
+            "plain_summary": "A marginally relevant method for edge cases in stellar photometry yields inconclusive results.",
+            "highlight_phrase": "marginal method tested",
+            "ai_score": score,
+            "score_tier": "ai",
+            "subscriber_score": 0.1,
+        }
+
+    def make_zero_subscriber_score_paper(self) -> dict:
+        return {
+            "id": "2501.00098",
+            "title": "Keyword fallback paper",
+            "plain_summary": "A paper about nothing in particular related to astronomy at all.",
+            "highlight_phrase": "unrelated paper here",
+            "ai_score": 0.0,
+            "score_tier": "keyword",
+            "subscriber_score": 0.0,
+        }
+
+    def test_paper_with_low_ai_score_rejected_by_validate_paper_quality(self):
+        """validate_paper_quality must fail papers with ai_score < 3.0 (score_tier='ai')."""
+        from shared.quality_gate import validate_paper_quality
+        paper = self.make_low_ai_score_paper(score=2.0)
+        ok, reason = validate_paper_quality(paper)
+        assert ok is False, (
+            f"Expected paper with ai_score=2.0 to fail quality gate, but it passed"
+        )
+        assert "ai_score" in reason or "score" in reason.lower(), (
+            f"Failure reason should mention score, got: {reason!r}"
+        )
+
+    def test_paper_with_ai_score_exactly_3_passes(self):
+        """ai_score=3.0 is the floor — paper must pass quality gate."""
+        from shared.quality_gate import validate_paper_quality
+        paper = self.make_low_ai_score_paper(score=3.0)
+        ok, reason = validate_paper_quality(paper)
+        assert ok is True, f"Expected ai_score=3.0 to pass, got failure: {reason!r}"
+
+    def test_keyword_paper_with_zero_subscriber_score_rejected(self):
+        """Keyword-only paper with subscriber_score=0 must fail the quality gate."""
+        from shared.quality_gate import validate_paper_quality
+        paper = self.make_zero_subscriber_score_paper()
+        ok, reason = validate_paper_quality(paper)
+        assert ok is False, (
+            "Expected keyword paper with subscriber_score=0 to fail quality gate"
+        )
+
+    def test_keyword_paper_with_positive_subscriber_score_passes(self):
+        """Keyword paper with subscriber_score > 0 must pass (if summary/phrase are good)."""
+        from shared.quality_gate import validate_paper_quality
+        paper = {
+            "id": "2501.00097",
+            "title": "Exoplanet paper",
+            "plain_summary": "Radial velocity measurement of exoplanet transit timing variations.",
+            "highlight_phrase": "exoplanet timing constraints",
+            "ai_score": 15.0,
+            "score_tier": "keyword",
+            "subscriber_score": 15.0,
+        }
+        ok, reason = validate_paper_quality(paper)
+        assert ok is True, f"Expected keyword paper with score>0 to pass, got: {reason!r}"

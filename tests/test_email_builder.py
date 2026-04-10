@@ -7,10 +7,12 @@ Covers:
   - build_personalized_digest_email: subject format, paper count
   - build_preview_email: cancel link present, top papers shown
   - Unsubscribe page, manage page, cancel confirmation page render
+  - Fix 4: email_builder._short_title strips LaTeX before truncation
 """
 import pytest
 
 from shared.email_builder import (
+    _short_title as email_short_title,
     build_cancel_confirmation_page,
     build_manage_confirmation_page,
     build_manage_page,
@@ -223,6 +225,65 @@ class TestGmailMessageBuilder:
             text_body="Test",
         )
         assert GMAIL_SENDER in msg["From"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fix 4: email_builder._short_title must strip LaTeX
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestEmailShortTitleLatexStripping:
+    """Fix 4: email_builder._short_title must strip LaTeX before truncation."""
+
+    def test_dollar_signs_removed(self):
+        result = email_short_title("$\\alpha$-elements in nearby stars")
+        assert "$" not in result, f"Dollar sign found in output: {result!r}"
+
+    def test_alpha_element_title_clean(self):
+        result = email_short_title("$\\alpha$-elements in nearby stars")
+        assert "alpha" in result.lower() or "elements" in result.lower(), (
+            f"Expected cleaned content, got: {result!r}"
+        )
+
+    def test_inline_math_unwrapped(self):
+        result = email_short_title("Constraints on $H_0$ from CMB observations")
+        assert "$" not in result
+        assert "H" in result
+
+    def test_backslash_commands_removed(self):
+        result = email_short_title("Measuring $\\sigma_8$ with weak lensing")
+        assert "\\" not in result
+
+    def test_subscript_notation_cleaned(self):
+        result = email_short_title("Stellar $T_{\\rm eff}$ from high-res spectra")
+        assert "$" not in result
+        assert "_" not in result or "eff" in result  # either stripped or rendered
+
+    def test_long_title_truncated_after_stripping(self):
+        """Truncation must happen AFTER LaTeX stripping, not before."""
+        # A title with lots of LaTeX that, when stripped, is much shorter
+        title = "$\\alpha$-elements " + "x" * 200
+        result = email_short_title(title, max_len=100)
+        assert len(result) <= 105  # allows for ellipsis
+
+    def test_clean_title_unchanged(self):
+        """Titles without LaTeX must pass through unchanged (below max_len)."""
+        clean = "Stellar evolution in binary star systems"
+        result = email_short_title(clean)
+        assert result == clean
+
+    def test_paper_card_renders_without_dollar_signs(self):
+        """End-to-end: a paper with LaTeX in title renders HTML without $."""
+        from shared.email_builder import _paper_card_branded
+        paper = {
+            "id": "2501.99999",
+            "title": "$\\alpha$-elements in metal-poor stars",
+            "abstract": "A study of alpha elements.",
+            "authors": ["Smith J"],
+            "url": "https://arxiv.org/abs/2501.99999",
+            "pdf_url": "https://arxiv.org/pdf/2501.99999",
+        }
+        html = _paper_card_branded(paper)
+        assert "$" not in html, f"Raw dollar sign found in rendered card: {html[:200]!r}"
 
 
 class TestStaticPages:

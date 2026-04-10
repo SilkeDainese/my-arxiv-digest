@@ -95,10 +95,18 @@ def _build_arxiv_url(category: str) -> str:
     return "https://export.arxiv.org/api/query?" + urllib.parse.urlencode(params)
 
 
+_USER_AGENT = "arxiv-digest-weekly/1.0 (mailto:silke.dainese@gmail.com)"
+
+
 def _fetch_xml(url: str) -> str | None:
-    """Fetch XML from arXiv API. Returns None on error."""
+    """Fetch XML from arXiv API with a compliant User-Agent. Returns None on error.
+
+    arXiv ToS requires a descriptive User-Agent identifying the client and
+    providing a contact address so they can reach out if there are issues.
+    """
     try:
-        with urllib.request.urlopen(url, timeout=30) as resp:
+        req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+        with urllib.request.urlopen(req, timeout=30) as resp:
             return resp.read().decode("utf-8")
     except (urllib.error.URLError, OSError) as exc:
         # Log the category/url, not any user data
@@ -107,8 +115,16 @@ def _fetch_xml(url: str) -> str | None:
 
 
 def _parse_xml(xml_data: str, cutoff: datetime) -> list[dict[str, Any]]:
-    """Parse arXiv Atom feed, filtering to papers submitted after cutoff."""
+    """Parse arXiv Atom feed, filtering to papers submitted after cutoff.
+
+    Extracts arxiv:primary_category into the 'category' field so every paper
+    shows its real sub-category (e.g. "astro-ph.SR") rather than falling back
+    to the generic "astro-ph" query category.
+    """
     ns = {"atom": "http://www.w3.org/2005/Atom"}
+    # arXiv-specific XML namespace for primary_category
+    ARXIV_NS = "http://arxiv.org/schemas/atom"
+
     try:
         root = ET.fromstring(xml_data)
     except ET.ParseError as exc:
@@ -136,6 +152,16 @@ def _parse_xml(xml_data: str, cutoff: datetime) -> list[dict[str, Any]]:
             for a in entry.findall("atom:author", ns)
         ]
 
+        # Extract the paper's actual primary category (e.g. "astro-ph.SR").
+        # The reference implementation (~/Projects/arxiv-digest/digest.py) uses
+        # the {http://arxiv.org/schemas/atom}primary_category element for this.
+        primary_cat_el = entry.find(f"{{{ARXIV_NS}}}primary_category")
+        category = (
+            primary_cat_el.get("term", "")
+            if primary_cat_el is not None
+            else ""
+        )
+
         papers.append({
             "id": arxiv_id,
             "title": title,
@@ -144,6 +170,7 @@ def _parse_xml(xml_data: str, cutoff: datetime) -> list[dict[str, Any]]:
             "published": published.isoformat(),
             "url": f"https://arxiv.org/abs/{arxiv_id}",
             "pdf_url": f"https://arxiv.org/pdf/{arxiv_id}",
+            "category": category,
         })
 
     return papers
@@ -217,6 +244,9 @@ def score_papers_for_all_topics(papers: list[dict[str, Any]]) -> list[dict[str, 
     return sorted(papers, key=lambda p: p["global_score"], reverse=True)
 
 
+_AI_SCORE_FLOOR = 3.0  # Papers with ai_score below this are dropped (AI-scored only)
+
+
 def build_personalized_digest(
     papers: list[dict[str, Any]],
     subscriber_topics: list[str],
@@ -225,21 +255,52 @@ def build_personalized_digest(
     """Filter and rank papers for a specific subscriber's topic list.
 
     Args:
-        papers: Full weekly paper list (from fetch_weekly_papers).
+        papers: Full weekly paper list (from fetch_weekly_papers), which has
+                already been run through score_papers_with_ai() so papers may
+                carry 'ai_score' and 'score_tier' fields.
         subscriber_topics: List of topic IDs the subscriber selected.
         max_papers: Maximum papers to include (default 15).
 
     Returns:
         Sorted list of papers with 'subscriber_score' field added,
-        limited to max_papers, score > 0 only.
+        limited to max_papers.
+
+    Ranking rules:
+      1. If ANY paper in the scored list has an 'ai_score' field, sort by
+         ai_score descending (subscriber_score as tiebreaker).
+      2. Otherwise fall back to subscriber_score descending.
+
+    Filtering rules:
+      - AI-scored papers (score_tier == 'ai') with ai_score < _AI_SCORE_FLOOR
+        are dropped.
+      - Keyword-only papers (no ai_score set, or score_tier == 'keyword')
+        require subscriber_score > 0 (existing behaviour preserved).
     """
     scored = []
     for paper in papers:
         score = score_paper_for_topics(paper, subscriber_topics)
-        if score > 0:
-            p = dict(paper)
-            p["subscriber_score"] = score
-            scored.append(p)
+        if score <= 0:
+            # Zero subscriber relevance — skip regardless of ai_score
+            continue
+        p = dict(paper)
+        p["subscriber_score"] = score
 
-    scored.sort(key=lambda p: p["subscriber_score"], reverse=True)
+        # Apply AI score floor: drop AI-scored papers rated below the floor
+        if p.get("score_tier") == "ai" and "ai_score" in p:
+            if float(p["ai_score"]) < _AI_SCORE_FLOOR:
+                continue
+
+        scored.append(p)
+
+    # Determine sort key: ai_score if ANY paper has it, else subscriber_score
+    use_ai_sort = any("ai_score" in p for p in scored)
+
+    if use_ai_sort:
+        scored.sort(
+            key=lambda p: (float(p.get("ai_score", 0)), p["subscriber_score"]),
+            reverse=True,
+        )
+    else:
+        scored.sort(key=lambda p: p["subscriber_score"], reverse=True)
+
     return scored[:max_papers]

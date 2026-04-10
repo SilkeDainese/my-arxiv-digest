@@ -37,6 +37,46 @@ _MAX_WORKERS = 5
 # How many consecutive failures before abandoning a tier
 _MAX_CONSECUTIVE_FAILURES = 3
 
+# Sentence openers that indicate author-voice writing — forbidden in plain_summary.
+# Used by: prompt builder (instruction to AI), keyword fallback (sentence filter),
+# and quality gate (final enforcement).
+BANNED_OPENERS: tuple[str, ...] = (
+    # Author-voice "We ..." variants
+    "we present",
+    "we show",
+    "we propose",
+    "we investigate",
+    "we find",
+    "we explore",
+    "we describe",
+    "we analyze",
+    "we analyse",
+    "we demonstrate",
+    "we report",
+    "we study",
+    "we ",          # catch-all: "We " followed by any verb
+    # Contextual author-voice starters
+    "in this paper",
+    "in this work",
+    "here we",
+    "this work",
+    # Original set
+    "researchers",
+    "the authors",
+    "this paper",
+    "a team",
+    "scientists",
+    "the researchers",
+    "authors",
+)
+
+
+def _starts_with_banned_opener(text: str) -> bool:
+    """Return True if *text* starts (case-insensitively) with any banned opener."""
+    lowered = text.lower().lstrip()
+    return any(lowered.startswith(opener) for opener in BANNED_OPENERS)
+
+
 STUDENT_RESEARCH_CONTEXT = (
     "AU astronomy students — bachelor's, master's, and PhD level. "
     "Topics include stellar astrophysics, exoplanets, galaxies, cosmology, "
@@ -149,7 +189,7 @@ Abstract: {clean_abstract}
 Respond with ONLY a valid JSON object (no markdown, no backticks):
 {{
   "relevance_score": <integer 1-10>,
-  "plain_summary": "<2-3 sentences written peer-to-peer, as one scientist summarising for another — lead with the result or method, not the researchers. NEVER start with 'Researchers', 'The authors', 'This paper', 'A team', 'Scientists', 'Authors', or 'The researchers'. Assume domain knowledge. Example good style: 'New ML approach for stellar Teff from high-res spectra — synthetic MARCS training, recovers within 50K on APOGEE benchmarks. Struggles below [Fe/H] = -2.'>",
+  "plain_summary": "<2-3 sentences written peer-to-peer, as one scientist summarising for another — lead with the result or method, not the researchers. NEVER start with any of these openers: 'We', 'We present', 'We show', 'We propose', 'We investigate', 'We find', 'We explore', 'We describe', 'We analyze', 'We analyse', 'We demonstrate', 'We report', 'We study', 'In this paper', 'In this work', 'Here we', 'This work', 'Researchers', 'The authors', 'This paper', 'A team', 'Scientists', 'Authors', 'The researchers'. Assume domain knowledge. Example good style: 'New ML approach for stellar Teff from high-res spectra — synthetic MARCS training, recovers within 50K on APOGEE benchmarks. Struggles below [Fe/H] = -2.'>",
   "highlight_phrase": "<punchy 5-8 word headline, no trailing punctuation>"
 }}
 
@@ -237,19 +277,50 @@ def _apply_ai_fields(paper: dict[str, Any], data: dict[str, Any]) -> None:
     paper["score_tier"] = "ai"
 
 
+def _split_sentences(text: str) -> list[str]:
+    """Split text into sentences by '. ', '! ', '? ' boundaries.
+
+    Returns a list of stripped sentence strings. Does not modify the text.
+    """
+    # Split on sentence-ending punctuation followed by whitespace
+    parts = re.split(r'(?<=[.!?])\s+', text.strip())
+    return [p.strip() for p in parts if p.strip()]
+
+
 def _apply_keyword_fields(paper: dict[str, Any]) -> None:
-    """Fill plain_summary and highlight_phrase from the paper's own data."""
+    """Fill plain_summary and highlight_phrase from the paper's own data.
+
+    Sentence-level author-voice filter (fail-closed):
+      - Check the first 3 sentences of the abstract.
+      - Skip any sentence that starts with a banned opener (BANNED_OPENERS).
+      - Use the first clean sentence found, trimmed to 250 chars.
+      - If no clean sentence is found in the first 3, plain_summary is set to ""
+        (empty string), which will be caught and rejected by the quality gate.
+
+    Do NOT rewrite author-voice to third person. Either find a clean sentence
+    or produce an empty summary — fail closed.
+    """
     abstract = paper.get("abstract", "")
     title = paper.get("title", "")
-    # Trim abstract to first 250 chars, strip LaTeX
-    summary = _strip_latex(" ".join(abstract.split()))
-    if len(summary) > 250:
-        cut = summary[:250].rfind(" ")
-        if cut > 150:
-            summary = summary[:cut] + "..."
-        else:
-            summary = summary[:250] + "..."
-    paper["plain_summary"] = summary or _strip_latex(title)
+
+    # Strip LaTeX and normalise whitespace from the whole abstract
+    clean_abstract = _strip_latex(" ".join(abstract.split()))
+
+    sentences = _split_sentences(clean_abstract)
+    first_three = sentences[:3]
+
+    chosen = ""
+    for sentence in first_three:
+        if not _starts_with_banned_opener(sentence):
+            # Found a clean sentence — trim to 250 chars at word boundary
+            if len(sentence) > 250:
+                cut = sentence[:250].rfind(" ")
+                sentence = sentence[:cut] + "..." if cut > 150 else sentence[:250] + "..."
+            chosen = sentence
+            break
+
+    # chosen is "" if all first-3 sentences were author-voice (fail-closed)
+    paper["plain_summary"] = chosen
     paper["highlight_phrase"] = _clean_highlight_phrase(_short_title(title, max_len=50))
     paper["ai_score"] = paper.get("global_score", paper.get("subscriber_score", 0))
     paper["score_tier"] = "keyword"
